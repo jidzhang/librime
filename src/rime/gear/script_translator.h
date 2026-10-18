@@ -49,11 +49,15 @@ class ScriptTranslator : public Translator,
   int max_homophones() const { return max_homophones_; }
   int spelling_hints() const { return spelling_hints_; }
   bool always_show_comments() const { return always_show_comments_; }
+  // 简拼/混合输入时，即使存在整段精确匹配词也构建组句候选
+  //（translator/abbrev_sentences，需 grammar 支持，默认关）。
+  bool abbrev_sentences() const { return abbrev_sentences_; }
   bool enable_word_completion() const { return enable_word_completion_; }
   int max_word_length() const { return max_word_length_; }
   int core_word_length() const;
 
  protected:
+  bool abbrev_sentences_ = false;
   int max_homophones_ = 1;
   int spelling_hints_ = 0;
   int max_word_length_ = 0;

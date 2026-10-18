@@ -69,6 +69,11 @@ class Poet {
 
   const Language* language_;
   the<Grammar> grammar_;
+
+ public:
+  bool has_grammar() const;
+
+ private:
   Compare compare_;
 };
 

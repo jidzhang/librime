@@ -11,6 +11,8 @@ class Config;
 class Grammar : public Class<Grammar, Config*> {
  public:
   virtual ~Grammar() {}
+  // 是否挂载了真实模型数据（未配 grammar/language 的 Octagram 为 false）。
+  virtual bool is_loaded() const { return true; }
   virtual double Query(const string& context,
                        const string& word,
                        bool is_rear) = 0;

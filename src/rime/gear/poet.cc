@@ -211,6 +211,9 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
         auto& target_state = states[end_pos];
         // extend candidates with dict entries on a valid edge.
         const DictEntryList& entries = ev.second;
+        DLOG(INFO) << "poet extend: [" << start_pos << "," << end_pos << ")"
+                   << " entries=" << entries.size()
+                   << " head=" << (entries.empty() ? string() : entries.front()->text);
         for (const auto& entry : entries) {
           const string& context =
               candidate.empty() ? preceding_text : candidate.context();
@@ -242,6 +245,8 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
   }
   return sentence;
 }
+
+bool Poet::has_grammar() const { return grammar_ && grammar_->is_loaded(); }
 
 an<Sentence> Poet::MakeSentence(const WordGraph& graph,
                                 size_t total_length,

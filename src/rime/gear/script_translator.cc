@@ -195,6 +195,7 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
       enable_word_completion_ = enable_completion_;
     }
     config->GetInt(name_space_ + "/max_homophones", &max_homophones_);
+    config->GetBool(name_space_ + "/abbrev_sentences", &abbrev_sentences_);
     poet_.reset(new Poet(language(), config));
   }
   if (enable_correction_) {
@@ -488,12 +489,39 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
       !is_correction_match(*user_phrase_iter_, consumed);
 
   bool has_at_least_two_syllables = syllable_graph.edges.size() >= 2;
-  DLOG(INFO) << "consumed: " << consumed
-             << ", has_reliable_phrase: " << has_reliable_phrase
-             << ", has_reliable_user_phrase: " << has_reliable_user_phrase
-             << ", has_at_least_two_syllables: " << has_at_least_two_syllables;
+  // 简拼/混合输入：整段精确匹配词（如 shin→十年，靠 abbrev 边命中）不再
+  // 压制组句搜索——让带语法模型的句子候选与词候选同台竞争。纯全拼输入
+  // 无 abbrev 边，行为不变。
+  bool has_abbrev_input = false;
+  bool has_full_input = false;
+  for (const auto& idx : syllable_graph.indices) {
+    for (const auto& sp : idx.second) {
+      for (const auto* props : sp.second) {
+        if (props->type == kAbbreviation) {
+          has_abbrev_input = true;
+        } else if (props->type == kNormalSpelling) {
+          has_full_input = true;
+        }
+        if (has_abbrev_input && has_full_input)
+          break;
+      }
+      if (has_abbrev_input && has_full_input)
+        break;
+    }
+    if (has_abbrev_input && has_full_input)
+      break;
+  }
+  DLOG(INFO) << "sentence gate:"
+             << " consumed=" << consumed
+            << " reliable_phrase=" << has_reliable_phrase
+            << " reliable_user=" << has_reliable_user_phrase
+            << " two_syl=" << has_at_least_two_syllables
+            << " abbrev_input=" << has_abbrev_input;
   // make sentences when there is no exact-matching phrase candidate
-  if (has_at_least_two_syllables && !has_reliable_phrase &&
+  if (has_at_least_two_syllables &&
+      (!has_reliable_phrase ||
+       (has_abbrev_input && has_full_input &&
+        translator_->abbrev_sentences())) &&
       !has_reliable_user_phrase) {
     if (max_sentences_ > 1)
       sentences_ = MakeSentences(dict, user_dict);

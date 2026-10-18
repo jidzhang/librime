@@ -16,3 +16,6 @@ node_modules/
 .cache/
 *.7z
 .DS_Store
+
+# 本机构建中间产物（573MB，不入库）
+build-tools/

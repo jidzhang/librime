@@ -67,10 +67,14 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     set<SyllableId> exact_match_syllables;
     auto current_input = input.substr(begin_pos);
     prism.CommonPrefixSearch(current_input, &matches);
-    if (corrector_) {
+    bool correction_enabled =
+        corrector_ || enable_transpose_ || enable_deletion_;
+    if (correction_enabled) {
       for (auto& m : matches) {
         exact_match_syllables.insert(m.value);
       }
+    }
+    if (corrector_) {
       Corrections corrections;
       corrector_->ToleranceSearch(prism, current_input, &corrections, 5);
       for (const auto& m : corrections) {
@@ -81,6 +85,69 @@ int Syllabifier::BuildSyllableGraph(const string& input,
             matches.push_back({m.first, m.second.length});
             break;
           }
+        }
+      }
+    }
+    // 换位容错（enable_transpose）：对剩余输入的相邻字符互换变体做前缀搜索。
+    // 位置 i 的换位变体只接受长度 > i+1 的匹配（须同时覆盖两个被换字符，
+    // 否则与正常搜索重复）。命中走纠错边（is_correction + credibility 惩罚）；
+    // 若正常拼写已覆盖该音节，下方 spellings 合并时 correction 自然被忽略。
+    set<int> transposed_match_values;
+    set<int> deleted_match_values;
+    if (enable_transpose_) {
+      // 只试前两个换位点：简拼边使每个位置都是图顶点，任意位置的换位都
+      // 能从其起始顶点以 i=0（或前一顶点 i=1）覆盖；全长度枚举实测使每键
+      // 延迟 +40%（O(n^3) trie 步），限两位后与正常搜索同量级。
+      for (size_t i = 0; i + 1 < current_input.size() && i < 2; ++i) {
+        if (current_input[i] == current_input[i + 1] ||
+            delimiters_.find(current_input[i]) != string::npos ||
+            delimiters_.find(current_input[i + 1]) != string::npos) {
+          continue;
+        }
+        string key = current_input;
+        std::swap(key[i], key[i + 1]);
+        vector<Prism::Match> tmatches;
+        prism.CommonPrefixSearch(key, &tmatches);
+        // 每个换位只取最长匹配：多前缀匹配会按候选数平方放大翻译开销
+        //（实测每键 +40% 延迟），最长拼写通常即用户意图音节。
+        const Prism::Match* best = nullptr;
+        for (const auto& m : tmatches) {
+          if (m.length == 0 || m.length <= i + 1)
+            continue;
+          if (!best || m.length > best->length)
+            best = &m;
+        }
+        if (best) {
+          transposed_match_values.insert(best->value);
+          matches.push_back(*best);
+        }
+      }
+    }
+    // 漏字容错：剩余输入删去第 i 位（i∈{0,1}，顶点密度同换位论证）后做
+    // 前缀搜索。命中的边需多消耗一个原字符：push length+1 使 end_pos 正确。
+    // 只取最长匹配（同换位的延迟教训）。
+    if (enable_deletion_) {
+      for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
+        if (delimiters_.find(current_input[i]) != string::npos)
+          continue;
+        string key = current_input;
+        key.erase(i, 1);
+        vector<Prism::Match> tmatches;
+        prism.CommonPrefixSearch(key, &tmatches);
+        const Prism::Match* best = nullptr;
+        for (const auto& m : tmatches) {
+          // 长度必须 >=2 且越过删除点：单字符匹配（o/w 等单字母音节）
+          // 会在每个顶点产出垃圾纠错边，候选路径爆炸（实测每键 +89%）。
+          if (m.length < 2 || m.length <= i)
+            continue;
+          if (!best || m.length > best->length)
+            best = &m;
+        }
+        if (best) {
+          deleted_match_values.insert(best->value);
+          Prism::Match m = *best;
+          m.length += 1;  // 边跨越被删字符
+          matches.push_back(m);
         }
       }
     }
@@ -114,10 +181,16 @@ int Syllabifier::BuildSyllableGraph(const string& input,
             props.end_pos = end_pos;
             // add a syllable with properties to the edge's
             // spelling-to-syllable map
-            if (corrector_ && exact_match_syllables.find(m.value) ==
-                                  exact_match_syllables.end()) {
+            if (correction_enabled &&
+                exact_match_syllables.find(m.value) ==
+                    exact_match_syllables.end()) {
               props.is_correction = true;
-              props.credibility = kCorrectionCredibility;
+              props.credibility =
+                  transposed_match_values.count(m.value)
+                      ? transpose_credibility_
+                  : deleted_match_values.count(m.value)
+                      ? deletion_credibility_
+                      : kCorrectionCredibility;
             }
             auto it = spellings.find(syllable_id);
             if (it == spellings.end()) {

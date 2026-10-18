@@ -58,12 +58,25 @@ class ScriptTranslator : public Translator,
   // 不影响全拼组句的既有平衡。
   double sentence_quality_boost() const { return sentence_quality_boost_; }
   bool enable_word_completion() const { return enable_word_completion_; }
+  // 换位容错（translator/enable_transpose，默认 false）：音节图加相邻字符
+  // 互换的纠错边（credibility 惩罚），使 diam/diama 类换位错字仍可达原词。
+  bool enable_transpose() const { return enable_transpose_; }
+  // 换位纠错边的 credibility 惩罚（translator/transpose_credibility，
+  // 默认 log(0.01)≈-4.6；更负 = 换位候选更难胜过正常解析，用于守卫调参）。
+  double transpose_credibility() const { return transpose_credibility_; }
+  // 漏字容错（translator/enable_deletion + deletion_credibility，默认关）。
+  bool enable_deletion() const { return enable_deletion_; }
+  double deletion_credibility() const { return deletion_credibility_; }
   int max_word_length() const { return max_word_length_; }
   int core_word_length() const;
 
  protected:
   bool abbrev_sentences_ = false;
   double sentence_quality_boost_ = 0.;
+  bool enable_transpose_ = false;
+  double transpose_credibility_ = -4.605170185988091;
+  bool enable_deletion_ = false;
+  double deletion_credibility_ = -4.605170185988091;
   int max_homophones_ = 1;
   int spelling_hints_ = 0;
   int max_word_length_ = 0;

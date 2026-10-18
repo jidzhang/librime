@@ -58,6 +58,19 @@ class Syllabifier {
                                   Prism& prism,
                                   SyllableGraph* graph);
   RIME_DLL void EnableCorrection(Corrector* corrector);
+  // 换位容错（translator/enable_transpose）：对每个顶点的剩余输入做相邻字符
+  // 互换变体的前缀搜索，命中边按纠错边处理（is_correction + credibility 惩罚）。
+  // 与邻键替换类纠错不同：有效输入的换位变体几乎不成有效音节，污染面小。
+  RIME_DLL void EnableTranspose(double credibility = -4.605170185988091) {
+    enable_transpose_ = true;
+    transpose_credibility_ = credibility;
+  }
+  // 漏字容错（translator/enable_deletion）：剩余输入删去一位后做前缀搜索，
+  // 边多消耗一个原字符（end_pos 前移 1）。与换位同款纠错边语义。
+  RIME_DLL void EnableDeletion(double credibility = -4.605170185988091) {
+    enable_deletion_ = true;
+    deletion_credibility_ = credibility;
+  }
 
  protected:
   void CheckOverlappedSpellings(SyllableGraph* graph, size_t start, size_t end);
@@ -66,6 +79,10 @@ class Syllabifier {
   string delimiters_;
   bool enable_completion_ = false;
   bool strict_spelling_ = false;
+  bool enable_transpose_ = false;
+  double transpose_credibility_ = -4.605170185988091;
+  bool enable_deletion_ = false;
+  double deletion_credibility_ = -4.605170185988091;
   Corrector* corrector_ = nullptr;
 };
 

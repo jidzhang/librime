@@ -90,6 +90,12 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     if (corrector) {
       syllabifier_.EnableCorrection(corrector);
     }
+    if (translator->enable_transpose()) {
+      syllabifier_.EnableTranspose(translator->transpose_credibility());
+    }
+    if (translator->enable_deletion()) {
+      syllabifier_.EnableDeletion(translator->deletion_credibility());
+    }
   }
 
   virtual Spans Syllabify(const Phrase* phrase);
@@ -192,6 +198,12 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
     config->GetBool(name_space_ + "/always_show_comments",
                     &always_show_comments_);
     config->GetBool(name_space_ + "/enable_correction", &enable_correction_);
+    config->GetBool(name_space_ + "/enable_transpose", &enable_transpose_);
+    config->GetDouble(name_space_ + "/transpose_credibility",
+                      &transpose_credibility_);
+    config->GetBool(name_space_ + "/enable_deletion", &enable_deletion_);
+    config->GetDouble(name_space_ + "/deletion_credibility",
+                      &deletion_credibility_);
     if (!config->GetBool(name_space_ + "/enable_word_completion",
                          &enable_word_completion_)) {
       enable_word_completion_ = enable_completion_;

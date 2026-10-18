@@ -65,6 +65,11 @@ RIME_DLL void SetupDeployer(RimeTraits* traits) {
     deployer.staging_dir = deployer.user_data_dir / "build";
 }
 
+namespace {
+// 日志文件保留天数；glog LogCleaner 按天清理。
+constexpr int kLogRetentionDays = 3;
+}  // namespace
+
 RIME_DLL void SetupLogging(const char* app_name,
                            int min_log_level,
                            const char* log_dir) {
@@ -84,6 +89,11 @@ RIME_DLL void SetupLogging(const char* app_name,
   google::SetLogSymlink(google::GLOG_INFO, app_name);
   google::SetLogSymlink(google::GLOG_WARNING, app_name);
   google::SetLogSymlink(google::GLOG_ERROR, app_name);
+  // 单文件上限 32MB（glog 默认 1800MB，一个失控的日志点能写出 GB 级单文件）。
+  FLAGS_max_log_size = 32;
+  // 开启 glog 自带的旧日志清理：超过保留期的日志文件自动删除。
+  // 默认未开启，是日志目录无限膨胀的根源之一。
+  google::EnableLogCleaner(kLogRetentionDays);
   // Do not allow other users to read/write log files created by current
   // process.
   FLAGS_logfile_mode = 0600;

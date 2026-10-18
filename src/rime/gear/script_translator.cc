@@ -175,6 +175,8 @@ class ScriptTranslation : public Translation {
   double sentence_cutoff_threshold_ = 0.1;
 
   bool enable_correction_;
+  // 本次组句是否经由 abbrev_sentences 门控（决定 quality 加成是否应用）
+  bool abbrev_gate_fired_ = false;
 };
 
 // ScriptTranslator implementation
@@ -196,6 +198,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
     }
     config->GetInt(name_space_ + "/max_homophones", &max_homophones_);
     config->GetBool(name_space_ + "/abbrev_sentences", &abbrev_sentences_);
+    config->GetDouble(name_space_ + "/sentence_quality_boost",
+                      &sentence_quality_boost_);
     poet_.reset(new Poet(language(), config));
   }
   if (enable_correction_) {
@@ -518,10 +522,10 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
             << " two_syl=" << has_at_least_two_syllables
             << " abbrev_input=" << has_abbrev_input;
   // make sentences when there is no exact-matching phrase candidate
+  abbrev_gate_fired_ = has_abbrev_input && has_full_input &&
+                       translator_->abbrev_sentences() && has_reliable_phrase;
   if (has_at_least_two_syllables &&
-      (!has_reliable_phrase ||
-       (has_abbrev_input && has_full_input &&
-        translator_->abbrev_sentences())) &&
+      (!has_reliable_phrase || abbrev_gate_fired_) &&
       !has_reliable_user_phrase) {
     if (max_sentences_ > 1)
       sentences_ = MakeSentences(dict, user_dict);
@@ -626,6 +630,17 @@ iter_incremented:
   if (!sentences_.empty()) {
     candidate_source_ = kSentence;
     candidate_ = sentences_[0];
+    // 句子候选 quality：上游从不设置（默认 0），句子在跨翻译器合并时
+    // 系统性吃亏。显式配置 sentence_quality_boost（≠0）时按词候选同款
+    // 公式补设（B 为对数平移，保持句子间按权重排序）；默认 0 = 不设，
+    // 完全保持上游行为。实验记录：B=0（仅 exp(weight)）使混合 +1.0，
+    // 但会把低权垃圾句（hello→和来咯）抬到英文之上，未定档。
+    double boost = abbrev_gate_fired_ ? translator_->sentence_quality_boost() : 0.;
+    if (boost != 0.) {
+      sentences_[0]->set_quality(
+          std::exp(sentences_[0]->weight() + boost) +
+          translator_->initial_quality());
+    }
     return true;
   }
   const size_t full_code_length = end_of_input_ - start_;

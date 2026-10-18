@@ -44,7 +44,11 @@ bool AbcSegmentor::Proceed(Segmentation* segmentation) {
   bool expecting_an_initial = true;
   for (; k < input.length(); ++k) {
     bool is_letter = alphabet_.find(input[k]) != string::npos;
-    bool is_delimiter = (k != 0) && (delimiter_.find(input[k]) != string::npos);
+    // 分隔符只能跟在本段字母之后（k != j），不能作为段的开头。
+    // 原判定 (k != 0) 只排除输入串绝对起点：数字分隔符特性（如 "1." 后
+    // 按空格提交）把分隔符 PushInput 到非 0 位置时，会为孤立的空格建出
+    // abc 段，触发词典空前缀补全，提交出 ".3D" 这类幽灵词条。
+    bool is_delimiter = (k != j) && (delimiter_.find(input[k]) != string::npos);
     if (!is_letter && !is_delimiter)
       break;
     bool is_initial = initials_.find(input[k]) != string::npos;

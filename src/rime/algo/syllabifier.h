@@ -71,6 +71,9 @@ class Syllabifier {
     enable_deletion_ = true;
     deletion_credibility_ = credibility;
   }
+  RIME_DLL void SetTypoEdgesEnabled(bool on) {
+    typo_edges_enabled_ = on && (enable_transpose_ || enable_deletion_);
+  }
 
  protected:
   void CheckOverlappedSpellings(SyllableGraph* graph, size_t start, size_t end);
@@ -83,6 +86,8 @@ class Syllabifier {
   double transpose_credibility_ = -4.605170185988091;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;
+  // 纠错边生效开关（translator/typo_gated 二遍查询用；默认 true=行为同旧）
+  bool typo_edges_enabled_ = true;
   Corrector* corrector_ = nullptr;
 };
 

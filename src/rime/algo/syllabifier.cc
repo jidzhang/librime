@@ -94,7 +94,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     // 若正常拼写已覆盖该音节，下方 spellings 合并时 correction 自然被忽略。
     set<int> transposed_match_values;
     set<int> deleted_match_values;
-    if (enable_transpose_) {
+    if (enable_transpose_ && typo_edges_enabled_) {
       // 只试前两个换位点：简拼边使每个位置都是图顶点，任意位置的换位都
       // 能从其起始顶点以 i=0（或前一顶点 i=1）覆盖；全长度枚举实测使每键
       // 延迟 +40%（O(n^3) trie 步），限两位后与正常搜索同量级。
@@ -126,7 +126,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     // 漏字容错：剩余输入删去第 i 位（i∈{0,1}，顶点密度同换位论证）后做
     // 前缀搜索。命中的边需多消耗一个原字符：push length+1 使 end_pos 正确。
     // 只取最长匹配（同换位的延迟教训）。
-    if (enable_deletion_) {
+    if (enable_deletion_ && typo_edges_enabled_) {
       for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
         if (delimiters_.find(current_input[i]) != string::npos)
           continue;

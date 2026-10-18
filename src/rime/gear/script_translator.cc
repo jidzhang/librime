@@ -96,7 +96,19 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     if (translator->enable_deletion()) {
       syllabifier_.EnableDeletion(translator->deletion_credibility());
     }
+    if (translator->typo_gated()) {
+      // 门控模式：首遍不带纠错边，由 ScriptTranslation 按候选质量决定重查
+      syllabifier_.SetTypoEdgesEnabled(false);
+    }
   }
+  void ClearGraph() {
+    syllable_graph_.vertices.clear();
+    syllable_graph_.edges.clear();
+    syllable_graph_.indices.clear();
+    syllable_graph_.input_length = 0;
+    syllable_graph_.interpreted_length = 0;
+  }
+  void EnableTypoEdgesForRetry() { syllabifier_.SetTypoEdgesEnabled(true); }
 
   virtual Spans Syllabify(const Phrase* phrase);
   size_t BuildSyllableGraph(Prism& prism);
@@ -181,6 +193,9 @@ class ScriptTranslation : public Translation {
   double sentence_cutoff_threshold_ = 0.1;
 
   bool enable_correction_;
+  bool had_reliable_phrase_ = false;
+  bool had_reliable_user_phrase_ = false;
+  bool typo_retry_done_ = false;
   // 本次组句是否经由 abbrev_sentences 门控（决定 quality 加成是否应用）
   bool abbrev_gate_fired_ = false;
 };
@@ -202,6 +217,7 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
     config->GetDouble(name_space_ + "/transpose_credibility",
                       &transpose_credibility_);
     config->GetBool(name_space_ + "/enable_deletion", &enable_deletion_);
+    config->GetBool(name_space_ + "/typo_gated", &typo_gated_);
     config->GetDouble(name_space_ + "/deletion_credibility",
                       &deletion_credibility_);
     if (!config->GetBool(name_space_ + "/enable_word_completion",
@@ -468,6 +484,22 @@ static bool has_exact_match_phrase(Ptr ptr, Iter iter, size_t consumed) {
 // ScriptTranslation implementation
 
 bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
+  bool ok = EvaluateWithGraph(dict, user_dict);
+  // 纠错门控（translator/typo_gated）：首遍无整段精确匹配词（错字输入特征）
+  // 时，带纠错边重建音节图重查一遍。有效输入零纠错开销与污染。
+  if (translator_->typo_gated() && !typo_retry_done_ &&
+      (!ok || (!had_reliable_phrase_ && !had_reliable_user_phrase_))) {
+    typo_retry_done_ = true;
+    syllabifier_->EnableTypoEdgesForRetry();
+    syllabifier_->ClearGraph();
+    if (EvaluateWithGraph(dict, user_dict))
+      return true;
+  }
+  return ok;
+}
+
+bool ScriptTranslation::EvaluateWithGraph(Dictionary* dict, UserDictionary* user_dict) {
+  typo_retry_done_ = typo_retry_done_;  // 状态位在包装层维护
   size_t consumed = syllabifier_->BuildSyllableGraph(*dict->prism());
   const auto& syllable_graph = syllabifier_->syllable_graph();
   bool predict_word = translator_->enable_word_completion() &&
@@ -503,6 +535,8 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
   bool has_reliable_user_phrase =
       has_exact_match_phrase(user_phrase_, user_phrase_iter_, consumed) &&
       !is_correction_match(*user_phrase_iter_, consumed);
+  had_reliable_phrase_ = has_reliable_phrase;
+  had_reliable_user_phrase_ = has_reliable_user_phrase;
 
   bool has_at_least_two_syllables = syllable_graph.edges.size() >= 2;
   // 简拼/混合输入：整段精确匹配词（如 shin→十年，靠 abbrev 边命中）不再

@@ -67,6 +67,8 @@ class ScriptTranslator : public Translator,
   // 漏字容错（translator/enable_deletion + deletion_credibility，默认关）。
   bool enable_deletion() const { return enable_deletion_; }
   double deletion_credibility() const { return deletion_credibility_; }
+  // 纠错门控（translator/typo_gated，默认 false）：首遍无整段精确词才带纠错边重查。
+  bool typo_gated() const { return typo_gated_; }
   int max_word_length() const { return max_word_length_; }
   int core_word_length() const;
 
@@ -77,6 +79,7 @@ class ScriptTranslator : public Translator,
   double transpose_credibility_ = -4.605170185988091;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;
+  bool typo_gated_ = false;
   int max_homophones_ = 1;
   int spelling_hints_ = 0;
   int max_word_length_ = 0;

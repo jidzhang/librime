@@ -90,7 +90,7 @@ if %clean% == 1 (
 )
 
 if defined CMAKE_GENERATOR (
-  set common_cmake_flags=%common_cmake_flags% -G%CMAKE_GENERATOR%
+  set common_cmake_flags=%common_cmake_flags% -G"%CMAKE_GENERATOR%"
 )
 if defined ARCH (
   set common_cmake_flags=%common_cmake_flags% -A%ARCH%

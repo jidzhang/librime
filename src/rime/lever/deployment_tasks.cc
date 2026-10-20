@@ -418,10 +418,16 @@ static bool ConfigNeedsUpdate(Config* config) {
       }
       continue;
     }
-    if (recorded_time !=
-        (int)filesystem::to_time_t(fs::last_write_time(source_file))) {
+    // Tolerate small mtime drift: installers (e.g. Inno Setup) drop
+    // sub-second precision, and to_time_t's file_clock->system_clock
+    // conversion jitters around whole-second boundaries per call, so an
+    // unchanged file can read 1s off the recorded value. Real edits shift
+    // mtime by minutes, far beyond this window.
+    int drift = (int)filesystem::to_time_t(fs::last_write_time(source_file)) -
+                recorded_time;
+    if (drift < -2 || drift > 2) {
       LOG(INFO) << "source file " << (recorded_time ? "changed: " : "added: ")
-                << source_file;
+                << source_file << " (mtime drift " << drift << "s)";
       return true;
     }
   }

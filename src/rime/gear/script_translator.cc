@@ -148,6 +148,7 @@ class ScriptTranslation : public Translation {
     set_exhausted(true);
   }
   bool Evaluate(Dictionary* dict, UserDictionary* user_dict);
+  bool EvaluateWithGraph(Dictionary* dict, UserDictionary* user_dict);
   virtual bool Next();
   virtual an<Candidate> Peek();
 

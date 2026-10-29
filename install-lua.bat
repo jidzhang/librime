@@ -1,3 +1,3 @@
 @echo off
-cd /d Z:\dev\IME\MoqiIME\librime-gaboolic\plugins\lua
+cd /d "%~dp0"\plugins\lua
 call action-install.bat

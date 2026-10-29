@@ -1,6 +1,6 @@
 @echo off
 call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
-cd /d Z:\dev\IME\MoqiIME\librime-gaboolic
+cd /d "%~dp0"
 call env.bat
 cmake . -B build-tools -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
   -DCMAKE_CONFIGURATION_TYPES:STRING="Release"^
@@ -13,6 +13,6 @@ cmake . -B build-tools -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
   -DBUILD_SHARED_LIBS=OFF^
   -DBUILD_TEST=OFF^
   -DENABLE_LOGGING=ON^
-  -DCMAKE_PREFIX_PATH:PATH="%RIME_ROOT%\deps\usr" > Z:\dev\IME\MoqiIME\librime-tools-configure.log 2>&1
-cmake --build build-tools --config Release --target build_grammar > Z:\dev\IME\MoqiIME\librime-tools-build2.log 2>&1
+  -DCMAKE_PREFIX_PATH:PATH="%RIME_ROOT%\deps\usr" > %~dp0..\librime-tools-configure.log 2>&1
+cmake --build build-tools --config Release --target build_grammar > %~dp0..\librime-tools-build2.log 2>&1
 exit /b %ERRORLEVEL%

@@ -131,6 +131,9 @@ class ScriptSyllabifier : public PhraseSyllabifier {
   bool has_degenerate_vertex() const {
     return syllabifier_.has_degenerate_vertex();
   }
+  bool has_normal_vertex() const {
+    return syllabifier_.has_normal_vertex();
+  }
 
   virtual Spans Syllabify(const Phrase* phrase);
   size_t BuildSyllableGraph(Prism& prism);
@@ -245,6 +248,10 @@ class ScriptTranslation : public Translation {
   // 首遍音节图是否出现退化顶点（typo_second_pass 长输入二遍触发信号）
   bool input_has_degenerate_vertex() const {
     return syllabifier_->has_degenerate_vertex();
+  }
+  // 输入是否含全拼顶点（二遍触发前置：纯简拼全顶点退化，不跑二遍）
+  bool input_has_normal_vertex() const {
+    return syllabifier_->has_normal_vertex();
   }
   virtual bool Next();
   virtual an<Candidate> Peek();
@@ -387,11 +394,15 @@ an<Translation> ScriptTranslator::Query(const string& input,
   // 首遍发现退化顶点（结构断裂信号）。
   if (typo_second_pass_ &&
       (enable_deletion_ || enable_substitution_ || enable_insertion_)) {
-    bool short_input =
-        input.length() <=
-        (size_t)typo_second_pass_max_input_length_;  // 默认 12
-    bool degenerate = !input.empty() && primary->input_has_degenerate_vertex();
-    if (short_input || degenerate) {
+    // 前置：输入须含全拼顶点——纯简拼（jp2/d6 画像）全顶点退化，
+    // 跑二遍只添扰动（jp2 实测 −0.55）与开销，直接跳过。
+    if (primary->input_has_normal_vertex()) {
+      bool short_input =
+          input.length() <=
+          (size_t)typo_second_pass_max_input_length_;  // 默认 12
+      bool degenerate =
+          !input.empty() && primary->input_has_degenerate_vertex();
+      if (short_input || degenerate) {
       auto second = New<ScriptTranslation>(
           this, corrector_.get(), poet_.get(), input, segment.start,
           end_of_input, /*max_sentences=*/0, sentence_cutoff_threshold_,
@@ -409,6 +420,7 @@ an<Translation> ScriptTranslator::Query(const string& input,
           result = unioned;
         }
       }
+    }
     }
   }
   auto deduped = New<DistinctTranslation>(result);

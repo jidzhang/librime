@@ -51,6 +51,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     return 0;
 
   found_degenerate_vertex_ = false;
+  found_normal_vertex_ = false;
   size_t farthest = 0;
   VertexQueue queue;
   queue.push(Vertex{0, kNormalSpelling});  // start
@@ -120,22 +121,33 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     bool need_degeneracy = (typo_gate_degenerate_ || track_degenerate_vertex_) &&
                            typo_edges_enabled_;
     if (need_degeneracy) {
+      // 退化=开不出任何全拼；全拼证据=存在 >=2 字符的全拼匹配（单字母
+      // a/e/o/m/n 音节不算——简拼首字母命中它会漏放 jp2 类输入）。
       bool vertex_degenerate = true;
+      bool vertex_ge2_normal = false;
       for (const auto& m : matches) {
         if (m.length == 0)
           continue;
+        bool m_normal = false;
         for (auto accessor = prism.QuerySpelling(m.value);
              !accessor.exhausted(); accessor.Next()) {
           if (accessor.properties().type == kNormalSpelling) {
-            vertex_degenerate = false;
+            m_normal = true;
             break;
           }
         }
-        if (!vertex_degenerate)
+        if (!m_normal)
+          continue;
+        vertex_degenerate = false;
+        if (m.length >= 2) {
+          vertex_ge2_normal = true;
           break;
+        }
       }
       if (vertex_degenerate)
         found_degenerate_vertex_ = true;
+      else if (vertex_ge2_normal)
+        found_normal_vertex_ = true;
       gated_edges_allowed = !vertex_degenerate;
     }
     if (corrector_) {

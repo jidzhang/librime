@@ -96,6 +96,9 @@ class Syllabifier {
   // 记录是否出现过"开不出任何全拼拼写"的顶点，供翻译层决定是否跑二遍。
   RIME_DLL void EnableDegenerateTracking() { track_degenerate_vertex_ = true; }
   bool has_degenerate_vertex() const { return found_degenerate_vertex_; }
+  // 输入里是否存在"能开出全拼拼写"的顶点（typo_second_pass 触发前置：
+  // 纯简拼输入全顶点退化、无全拼顶点，不跑二遍——jp2/d6 守卫与开销双收）
+  bool has_normal_vertex() const { return found_normal_vertex_; }
   RIME_DLL void SetTypoEdgesEnabled(bool on) {
     typo_edges_enabled_ = on && (enable_transpose_ || enable_deletion_ ||
                                  enable_substitution_ || enable_insertion_);
@@ -120,6 +123,7 @@ class Syllabifier {
   bool typo_gate_degenerate_ = false;
   bool track_degenerate_vertex_ = false;
   bool found_degenerate_vertex_ = false;
+  bool found_normal_vertex_ = false;
   // 纠错边生效开关（translator/typo_gated 二遍查询用；默认 true=行为同旧）
   bool typo_edges_enabled_ = true;
   Corrector* corrector_ = nullptr;

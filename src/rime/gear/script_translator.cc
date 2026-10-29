@@ -102,7 +102,8 @@ class ScriptSyllabifier : public PhraseSyllabifier {
         syllabifier_.EnableDeletion(translator->deletion_credibility());
       }
       if (translator->enable_substitution()) {
-        syllabifier_.EnableSubstitution(translator->substitution_credibility());
+        syllabifier_.EnableSubstitution(translator->substitution_credibility(),
+                                      translator->substitution_horizontal_only());
       }
       if (translator->enable_insertion()) {
         syllabifier_.EnableInsertion(translator->insertion_credibility());
@@ -133,6 +134,9 @@ class ScriptSyllabifier : public PhraseSyllabifier {
   }
   bool has_normal_vertex() const {
     return syllabifier_.has_normal_vertex();
+  }
+  bool IsNormalPinyinPrefix(Prism& prism) {
+    return syllabifier_.IsNormalPinyinPrefix(input_, prism);
   }
 
   virtual Spans Syllabify(const Phrase* phrase);
@@ -253,6 +257,12 @@ class ScriptTranslation : public Translation {
   bool input_has_normal_vertex() const {
     return syllabifier_->has_normal_vertex();
   }
+  // 输入能否被全拼解释掉（质量门：能解释=用户还在正常打字，不纠错）
+  bool input_is_normal_pinyin_prefix(Prism& prism) {
+    return syllabifier_->IsNormalPinyinPrefix(prism);
+  }
+  // 整串是否被某个词典词完整覆盖（含简拼）：是=输入有明确含义，不纠错
+  bool input_has_covering_word() const { return had_covering_phrase_; }
   virtual bool Next();
   virtual an<Candidate> Peek();
 
@@ -299,6 +309,7 @@ class ScriptTranslation : public Translation {
 
   bool enable_correction_;
   bool had_reliable_phrase_ = false;
+  bool had_covering_phrase_ = false;
   bool had_reliable_user_phrase_ = false;
   bool typo_retry_done_ = false;
   // 本次组句是否经由 abbrev_sentences 门控（决定 quality 加成是否应用）
@@ -329,6 +340,13 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
                     &enable_substitution_);
     config->GetDouble(name_space_ + "/substitution_credibility",
                       &substitution_credibility_);
+    {
+      string neighbors;
+      if (config->GetString(name_space_ + "/substitution_neighbors",
+                            &neighbors)) {
+        substitution_horizontal_only_ = (neighbors == "horizontal");
+      }
+    }
     config->GetBool(name_space_ + "/enable_insertion", &enable_insertion_);
     config->GetDouble(name_space_ + "/insertion_credibility",
                       &insertion_credibility_);
@@ -339,6 +357,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
                    &typo_second_pass_max_input_length_);
     config->GetInt(name_space_ + "/typo_second_pass_insert_after",
                    &typo_second_pass_insert_after_);
+    config->GetBool(name_space_ + "/typo_second_pass_skip_normal_prefix",
+                    &typo_second_pass_skip_normal_prefix_);
     if (!config->GetBool(name_space_ + "/enable_word_completion",
                          &enable_word_completion_)) {
       enable_word_completion_ = enable_completion_;
@@ -402,7 +422,16 @@ an<Translation> ScriptTranslator::Query(const string& input,
           (size_t)typo_second_pass_max_input_length_;  // 默认 12
       bool degenerate =
           !input.empty() && primary->input_has_degenerate_vertex();
-      if (short_input || degenerate) {
+      // 质量门（2026-10-29 用户定"纠错不要做过了"）：输入能按全拼解释掉
+      //（整串合法，或尾巴是某音节前缀如 wofe→wofei）说明候选已贴近目标，
+      // 不触发纠错，避免把 我飞 的输入注入 我的。
+      bool normal_prefix =
+          typo_second_pass_skip_normal_prefix_ &&
+          primary->input_is_normal_pinyin_prefix(*dict_->prism());
+      // 整串被词典词吃掉（wlde→未来的/无聊的）→ 视为候选已贴近目标，不纠错
+      bool covered = typo_second_pass_skip_normal_prefix_ &&
+                     primary->input_has_covering_word();
+      if ((short_input || degenerate) && !normal_prefix && !covered) {
       auto second = New<ScriptTranslation>(
           this, corrector_.get(), poet_.get(), input, segment.start,
           end_of_input, /*max_sentences=*/0, sentence_cutoff_threshold_,
@@ -693,6 +722,13 @@ bool ScriptTranslation::EvaluateWithGraph(Dictionary* dict, UserDictionary* user
 
   bool has_reliable_phrase =
       has_exact_match_phrase(phrase_, phrase_iter_, consumed) &&
+      !is_correction_match(*phrase_iter_, consumed);
+  // 整串被词典词吃掉（允许简拼/补全拼写）：说明用户输入本身有明确含义，
+  // 属"候选已贴近目标"，二遍纠错不该介入（2026-10-29 用户定：
+  // wlde→未来的/无聊的/我懒得 比 我的 更合理，不该纠错）。
+  had_covering_phrase_ =
+      phrase_ && phrase_iter_->first == consumed &&
+      !phrase_iter_->second.exhausted() &&
       !is_correction_match(*phrase_iter_, consumed);
 
   bool has_reliable_user_phrase =

@@ -70,6 +70,11 @@ class ScriptTranslator : public Translator,
   // 邻键替换容错（translator/enable_substitution + substitution_credibility，
   // 默认关）：d7 打错键场景，QWERTY 物理邻键替换的纠错边。
   bool enable_substitution() const { return enable_substitution_; }
+  // 替换边邻键范围（translator/substitution_neighbors=horizontal 时只取
+  // 同行左右；默认几何全向含斜向）。
+  bool substitution_horizontal_only() const {
+    return substitution_horizontal_only_;
+  }
   double substitution_credibility() const { return substitution_credibility_; }
   // 漏打容错（translator/enable_insertion + insertion_credibility，默认关）：
   // d7 少打字母场景，虚拟插入一个字母的纠错边。
@@ -92,6 +97,11 @@ class ScriptTranslator : public Translator,
   int typo_second_pass_insert_after() const {
     return typo_second_pass_insert_after_;
   }
+  // 质量门（translator/typo_second_pass_skip_normal_prefix，默认 true）：
+  // 输入能被全拼解释掉时不触发二遍（用户还在正常打字/补全中）。
+  bool typo_second_pass_skip_normal_prefix() const {
+    return typo_second_pass_skip_normal_prefix_;
+  }
   // 纠错门控（translator/typo_gated，默认 false）：首遍无整段精确词才带纠错边重查。
   bool typo_gated() const { return typo_gated_; }
   int max_word_length() const { return max_word_length_; }
@@ -107,12 +117,14 @@ class ScriptTranslator : public Translator,
   double deletion_credibility_ = -4.605170185988091;
   bool enable_substitution_ = false;
   double substitution_credibility_ = -4.605170185988091;
+  bool substitution_horizontal_only_ = false;
   bool enable_insertion_ = false;
   double insertion_credibility_ = -4.605170185988091;
   bool typo_gate_degenerate_ = false;
   bool typo_second_pass_ = false;
   int typo_second_pass_max_input_length_ = 12;
   int typo_second_pass_insert_after_ = 5;
+  bool typo_second_pass_skip_normal_prefix_ = true;
   bool typo_gated_ = false;
   int max_homophones_ = 1;
   int spelling_hints_ = 0;

@@ -76,9 +76,11 @@ class Syllabifier {
   }
   // 邻键替换容错（translator/enable_substitution）：剩余输入第 i 位（i∈{0,1}）
   // 换成 QWERTY 物理邻键后做前缀搜索，取最长匹配（须覆盖被替换位）。
-  RIME_DLL void EnableSubstitution(double credibility = -4.605170185988091) {
+  RIME_DLL void EnableSubstitution(double credibility = -4.605170185988091,
+                                   bool horizontal_only = false) {
     enable_substitution_ = true;
     substitution_credibility_ = credibility;
+    substitution_horizontal_only_ = horizontal_only;
   }
   // 漏打容错（translator/enable_insertion）：剩余输入第 i 位（i∈{0,1}）插入
   // 任一字母后做前缀搜索，插入字符是虚拟的（边少消耗一个原字符）。
@@ -96,6 +98,13 @@ class Syllabifier {
   // 记录是否出现过"开不出任何全拼拼写"的顶点，供翻译层决定是否跑二遍。
   RIME_DLL void EnableDegenerateTracking() { track_degenerate_vertex_ = true; }
   bool has_degenerate_vertex() const { return found_degenerate_vertex_; }
+  // 输入能否按"全拼"解释掉（typo_second_pass 质量门，2026-10-29 用户定
+  // "纠错不要做过了：候选已明确靠近目标就不该触发"）：
+  // ①整串可被全拼音节完整覆盖 → true（合法拼音，不需要纠错）；
+  // ②已覆盖前缀 + 剩余尾巴是某个全拼音节的前缀（wofe→wofei）→ true
+  //（用户还在打字，属补全场景）。
+  // 只看 kNormalSpelling，简拼/补全边不算——否则 wokde 会被当"合法简拼"放过。
+  RIME_DLL bool IsNormalPinyinPrefix(const string& input, Prism& prism);
   // 输入里是否存在"能开出全拼拼写"的顶点（typo_second_pass 触发前置：
   // 纯简拼输入全顶点退化、无全拼顶点，不跑二遍——jp2/d6 守卫与开销双收）
   bool has_normal_vertex() const { return found_normal_vertex_; }
@@ -118,6 +127,7 @@ class Syllabifier {
   double deletion_credibility_ = -4.605170185988091;
   bool enable_substitution_ = false;
   double substitution_credibility_ = -4.605170185988091;
+  bool substitution_horizontal_only_ = false;
   bool enable_insertion_ = false;
   double insertion_credibility_ = -4.605170185988091;
   bool typo_gate_degenerate_ = false;

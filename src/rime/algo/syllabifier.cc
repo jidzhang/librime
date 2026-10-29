@@ -32,6 +32,17 @@ const double kCorrectionCredibility = -4.605170185988091;  // log(0.01)
 // 欧氏距离 <=1.2 键宽为邻。'a' -> q/s/w/z，与评测注入器 probe-neighbor.go
 // 同一几何，保证"注入什么就修什么"。librime 自带 corrector.cc 的
 // keyboard_map 只有同行左右邻（'a'->'s'），不覆盖上下行，故此处独立成表。
+// 水平邻键表（同行左右，libime/librime 口径；斜向在真实键盘上争议大，
+// 2026-10-29 做成可选项 substitution_neighbors=horizontal 供扫参）。
+static const char* const kQwertyNeighborsHorizontal[26] = {
+    /* a */ "s",  /* b */ "vn", /* c */ "xv", /* d */ "sf", /* e */ "wr",
+    /* f */ "dg", /* g */ "fh", /* h */ "gj", /* i */ "uo", /* j */ "hk",
+    /* k */ "jl", /* l */ "k",  /* m */ "n",  /* n */ "bm", /* o */ "ip",
+    /* p */ "o",  /* q */ "w",  /* r */ "et", /* s */ "ad", /* t */ "ry",
+    /* u */ "yi", /* v */ "cb", /* w */ "qe", /* x */ "zc", /* y */ "tu",
+    /* z */ "x",
+};
+
 static const char* const kQwertyNeighbors[26] = {
     /* a */ "qswz",          /* b */ "ghnv",         /* c */ "dfvx",
     /* d */ "cefrsx",        /* e */ "drsw",         /* f */ "cdgrtv",
@@ -43,6 +54,66 @@ static const char* const kQwertyNeighbors[26] = {
     /* v */ "bcfg",          /* w */ "aeqs",         /* x */ "cdsz",
     /* y */ "ghtu",          /* z */ "asx",
 };
+
+namespace {
+// 该拼写是否"正常全拼"（非简拼/补全/纠错/模糊）。
+bool SpellingIsNormal(Prism& prism, int value) {
+  for (auto accessor = prism.QuerySpelling(value); !accessor.exhausted();
+       accessor.Next()) {
+    if (accessor.properties().type == kNormalSpelling)
+      return true;
+  }
+  return false;
+}
+}  // namespace
+
+bool Syllabifier::IsNormalPinyinPrefix(const string& input, Prism& prism) {
+  if (input.empty())
+    return true;
+  const size_t n = input.length();
+  // reach[i] = 前 i 个字符能被全拼音节完整覆盖
+  vector<char> reach(n + 1, 0);
+  reach[0] = 1;
+  size_t farthest = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (!reach[i])
+      continue;
+    if (i > farthest)
+      farthest = i;
+    vector<Prism::Match> matches;
+    prism.CommonPrefixSearch(input.substr(i), &matches);
+    for (const auto& m : matches) {
+      // 单字母音节（a/o/e/m/n）不能当"完整音节"用：否则 womn（我们漏打）
+      // 会被读成 wo+m+n 而判成"还在打字"，漏打场景全部失效。它只允许
+      // 出现在末尾的补全位（由下面的 trie 尾巴判定处理）。
+      if (m.length < 2 || i + m.length > n)
+        continue;
+      if (!SpellingIsNormal(prism, m.value))
+        continue;
+      reach[i + m.length] = 1;
+    }
+  }
+  if (reach[n])
+    return true;  // 整串就是合法全拼
+  for (size_t i = n; i > farthest; --i) {
+    if (!reach[i])
+      continue;
+    farthest = i;
+  }
+  // 尾巴是否为某个全拼音节的前缀（Darts trie 逐字符下行；
+  // traverse 返回 -2=无路径，-1=节点存在但非拼写终点（仍是合法前缀），
+  // >=0=命中拼写终点。两种非 -2 都算"prefix"。
+  if (farthest >= n)
+    return true;
+  auto& trie = prism.trie();
+  size_t node = 0;
+  for (size_t i = farthest; i < n; ++i) {
+    int val = trie.traverse(input.c_str(), node, i, i + 1);
+    if (val == -2)
+      return false;  // 无路径：不可能是任何音节的前缀
+  }
+  return true;
+}
 
 int Syllabifier::BuildSyllableGraph(const string& input,
                                     Prism& prism,
@@ -240,7 +311,10 @@ int Syllabifier::BuildSyllableGraph(const string& input,
         if (current_input[i] < 'a' || current_input[i] > 'z' ||
             delimiters_.find(current_input[i]) != string::npos)
           continue;  // alphabet 含大写；邻键表按小写索引，越界即踩内存
-        const char* nbrs = kQwertyNeighbors[current_input[i] - 'a'];
+        const char* nbrs =
+            substitution_horizontal_only_
+                ? kQwertyNeighborsHorizontal[current_input[i] - 'a']
+                : kQwertyNeighbors[current_input[i] - 'a'];
         for (const char* p = nbrs; *p; ++p) {
           string key(current_input);
           key[i] = *p;
@@ -274,7 +348,10 @@ int Syllabifier::BuildSyllableGraph(const string& input,
           prism.CommonPrefixSearch(key, &tmatches);
           const Prism::Match* best = nullptr;
           for (const auto& m : tmatches) {
-            if (m.length < 3 || m.length < i + 2)
+            // 匹配须覆盖插入位（length >= i+1）：i=1 时 "wo" 这种 2 字
+            // 音节也要能救（wde→wo+de，漏打最常见的形态）。单字符匹配
+            // 在减 1 后长度为 0，下面 continue 掉，不会产垃圾边。
+            if (m.length < i + 1)
               continue;
             if (!best || m.length > best->length)
               best = &m;

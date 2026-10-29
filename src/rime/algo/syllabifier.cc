@@ -50,6 +50,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
   if (input.empty())
     return 0;
 
+  found_degenerate_vertex_ = false;
   size_t farthest = 0;
   VertexQueue queue;
   queue.push(Vertex{0, kNormalSpelling});  // start
@@ -110,26 +111,32 @@ int Syllabifier::BuildSyllableGraph(const string& input,
         exact_match_syllables.insert(m.value);
       }
     }
-    // 退化顶点判定（typo_gate_degenerate）：该位置开不出任何全拼拼写
-    //（kNormalSpelling，含 a/o/e/m/n 单字母音节）→ 全拼结构已断，
-    // 是"用户打错了"的结构信号。d7 实测：正确输入 22/23 的删除边损伤
-    // 路径落在非退化顶点。门控只作用于 del/sub/ins 三边，换位边不受控。
+    // 退化顶点判定：该位置开不出任何全拼拼写（kNormalSpelling，含
+    // a/o/e/m/n 单字母音节）→ 全拼结构已断，是"用户打错了"的结构信号。
+    // 两个用途：① typo_gate_degenerate 图内门控（2026-10-29 实测证伪留档，
+    // 挡不住跨音节歧义位置的新损伤）；② typo_second_pass 二遍触发信号
+    //（首遍记录，供翻译层对长输入按需跑二遍）。
     bool gated_edges_allowed = true;
-    if (typo_gate_degenerate_ && typo_edges_enabled_) {
-      gated_edges_allowed = false;
+    bool need_degeneracy = (typo_gate_degenerate_ || track_degenerate_vertex_) &&
+                           typo_edges_enabled_;
+    if (need_degeneracy) {
+      bool vertex_degenerate = true;
       for (const auto& m : matches) {
         if (m.length == 0)
           continue;
         for (auto accessor = prism.QuerySpelling(m.value);
              !accessor.exhausted(); accessor.Next()) {
           if (accessor.properties().type == kNormalSpelling) {
-            gated_edges_allowed = true;
+            vertex_degenerate = false;
             break;
           }
         }
-        if (gated_edges_allowed)
+        if (!vertex_degenerate)
           break;
       }
+      if (vertex_degenerate)
+        found_degenerate_vertex_ = true;
+      gated_edges_allowed = !vertex_degenerate;
     }
     if (corrector_) {
       Corrections corrections;

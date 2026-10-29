@@ -92,6 +92,10 @@ class Syllabifier {
   // 逐句归因：无门控删除边打坏 d5 的 68 句中 23 句直接删除路径有 22 句
   // 落在非退化顶点，此门可挡；同音排序涟漪随边消失。
   RIME_DLL void EnableDegenerateGate() { typo_gate_degenerate_ = true; }
+  // 退化顶点跟踪（typo_second_pass 二遍触发信号）：BuildSyllableGraph 期间
+  // 记录是否出现过"开不出任何全拼拼写"的顶点，供翻译层决定是否跑二遍。
+  RIME_DLL void EnableDegenerateTracking() { track_degenerate_vertex_ = true; }
+  bool has_degenerate_vertex() const { return found_degenerate_vertex_; }
   RIME_DLL void SetTypoEdgesEnabled(bool on) {
     typo_edges_enabled_ = on && (enable_transpose_ || enable_deletion_ ||
                                  enable_substitution_ || enable_insertion_);
@@ -114,6 +118,8 @@ class Syllabifier {
   bool enable_insertion_ = false;
   double insertion_credibility_ = -4.605170185988091;
   bool typo_gate_degenerate_ = false;
+  bool track_degenerate_vertex_ = false;
+  bool found_degenerate_vertex_ = false;
   // 纠错边生效开关（translator/typo_gated 二遍查询用；默认 true=行为同旧）
   bool typo_edges_enabled_ = true;
   Corrector* corrector_ = nullptr;

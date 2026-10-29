@@ -80,7 +80,8 @@ class ScriptSyllabifier : public PhraseSyllabifier {
   ScriptSyllabifier(ScriptTranslator* translator,
                     Corrector* corrector,
                     const string& input,
-                    size_t start)
+                    size_t start,
+                    bool second_pass = false)
       : translator_(translator),
         input_(input),
         start_(start),
@@ -94,16 +95,24 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     if (translator->enable_transpose()) {
       syllabifier_.EnableTranspose(translator->transpose_credibility());
     }
-    if (translator->enable_deletion()) {
-      syllabifier_.EnableDeletion(translator->deletion_credibility());
+    // 二遍拼接（typo_second_pass）：del/sub/ins 三边只在二遍开——首遍
+    // 保持纯净（主列表零污染），二遍结果由 Query 层 Union 追加不竞争。
+    if (second_pass || !translator->typo_second_pass()) {
+      if (translator->enable_deletion()) {
+        syllabifier_.EnableDeletion(translator->deletion_credibility());
+      }
+      if (translator->enable_substitution()) {
+        syllabifier_.EnableSubstitution(translator->substitution_credibility());
+      }
+      if (translator->enable_insertion()) {
+        syllabifier_.EnableInsertion(translator->insertion_credibility());
+      }
+    } else {
+      // 首遍记录退化顶点，作为长输入的二遍触发信号
+      syllabifier_.EnableDegenerateTracking();
     }
-    if (translator->enable_substitution()) {
-      syllabifier_.EnableSubstitution(translator->substitution_credibility());
-    }
-    if (translator->enable_insertion()) {
-      syllabifier_.EnableInsertion(translator->insertion_credibility());
-    }
-    if (translator->typo_gate_degenerate()) {
+    if (translator->typo_gate_degenerate() && !translator->typo_second_pass()) {
+      // 图内门控实验模式（2026-10-29 证伪留档），与二遍拼接互斥
       syllabifier_.EnableDegenerateGate();
     }
     if (translator->typo_gated()) {
@@ -119,6 +128,9 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     syllable_graph_.interpreted_length = 0;
   }
   void EnableTypoEdgesForRetry() { syllabifier_.SetTypoEdgesEnabled(true); }
+  bool has_degenerate_vertex() const {
+    return syllabifier_.has_degenerate_vertex();
+  }
 
   virtual Spans Syllabify(const Phrase* phrase);
   size_t BuildSyllableGraph(Prism& prism);
@@ -136,6 +148,76 @@ class ScriptSyllabifier : public PhraseSyllabifier {
   SyllableGraph syllable_graph_;
 };
 
+// 交错拼接（typo_second_pass_insert_after）：首遍候选先出 insert_after 个，
+// 然后二遍纠错候选插进来出尽，再回到首遍续播。纠错候选不参与竞争
+//（不抢首遍 top-1），但保证落在第一页可见区；纯 Union 追加会把
+// 纠错词沉到首遍几十个候选之后，用户翻页都翻不到。
+class InterleaveTranslation : public Translation {
+ public:
+  InterleaveTranslation(const an<Translation>& primary,
+                        const an<Translation>& secondary,
+                        size_t insert_after)
+      : primary_(primary),
+        secondary_(secondary),
+        insert_after_(insert_after) {
+    current_ = primary_;
+    if (primary_ && primary_->exhausted()) {
+      if (secondary_ && !secondary_->exhausted()) {
+        primary_.reset();
+        current_ = secondary_;
+      } else {
+        set_exhausted(true);
+      }
+    }
+  }
+
+  virtual bool Next();
+  virtual an<Candidate> Peek();
+
+ protected:
+  an<Translation> primary_;
+  an<Translation> secondary_;
+  an<Translation> current_;
+  size_t insert_after_;
+  size_t primary_emitted_ = 0;
+};
+
+bool InterleaveTranslation::Next() {
+  if (exhausted() || !current_)
+    return false;
+  if (current_ == primary_)
+    ++primary_emitted_;
+  current_->Next();
+  for (;;) {
+    if (!current_->exhausted()) {
+      if (current_ == primary_ && secondary_ && !secondary_->exhausted() &&
+          primary_emitted_ >= insert_after_) {
+        current_ = secondary_;
+        continue;
+      }
+      return true;
+    }
+    // current_ 耗尽：尝试切换
+    if (current_ == primary_ && secondary_ && !secondary_->exhausted()) {
+      current_ = secondary_;  // 首遍提前耗尽
+      continue;
+    }
+    if (current_ == secondary_ && primary_) {
+      current_ = primary_;  // 二遍放完，回首遍续播
+      secondary_.reset();
+      continue;
+    }
+    set_exhausted(true);
+    return true;
+  }
+}
+
+an<Candidate> InterleaveTranslation::Peek() {
+  if (exhausted() || !current_)
+    return nullptr;
+  return current_->Peek();
+}
+
 class ScriptTranslation : public Translation {
  public:
   ScriptTranslation(ScriptTranslator* translator,
@@ -145,13 +227,14 @@ class ScriptTranslation : public Translation {
                     size_t start,
                     size_t end_of_input,
                     int max_sentences,
-                    double sentence_cutoff_threshold)
+                    double sentence_cutoff_threshold,
+                    bool second_pass = false)
       : translator_(translator),
         poet_(poet),
         start_(start),
         end_of_input_(end_of_input),
-        syllabifier_(
-            New<ScriptSyllabifier>(translator, corrector, input, start)),
+        syllabifier_(New<ScriptSyllabifier>(translator, corrector, input,
+                                            start, second_pass)),
         enable_correction_(corrector),
         max_sentences_(max_sentences),
         sentence_cutoff_threshold_(sentence_cutoff_threshold) {
@@ -159,6 +242,10 @@ class ScriptTranslation : public Translation {
   }
   bool Evaluate(Dictionary* dict, UserDictionary* user_dict);
   bool EvaluateWithGraph(Dictionary* dict, UserDictionary* user_dict);
+  // 首遍音节图是否出现退化顶点（typo_second_pass 长输入二遍触发信号）
+  bool input_has_degenerate_vertex() const {
+    return syllabifier_->has_degenerate_vertex();
+  }
   virtual bool Next();
   virtual an<Candidate> Peek();
 
@@ -240,6 +327,11 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
                       &insertion_credibility_);
     config->GetBool(name_space_ + "/typo_gate_degenerate",
                     &typo_gate_degenerate_);
+    config->GetBool(name_space_ + "/typo_second_pass", &typo_second_pass_);
+    config->GetInt(name_space_ + "/typo_second_pass_max_input_length",
+                   &typo_second_pass_max_input_length_);
+    config->GetInt(name_space_ + "/typo_second_pass_insert_after",
+                   &typo_second_pass_insert_after_);
     if (!config->GetBool(name_space_ + "/enable_word_completion",
                          &enable_word_completion_)) {
       enable_word_completion_ = enable_completion_;
@@ -279,12 +371,45 @@ an<Translation> ScriptTranslator::Query(const string& input,
 
   size_t end_of_input = engine_->context()->input().length();
   // the translator should survive translations it creates
-  auto result = New<ScriptTranslation>(
+  auto primary = New<ScriptTranslation>(
       this, corrector_.get(), poet_.get(), input, segment.start, end_of_input,
       max_sentences_, sentence_cutoff_threshold_);
-  if (!result || !result->Evaluate(
-                     dict_.get(), enable_user_dict ? user_dict_.get() : NULL)) {
+  if (!primary ||
+      !primary->Evaluate(dict_.get(),
+                         enable_user_dict ? user_dict_.get() : NULL)) {
     return nullptr;
+  }
+  an<Translation> result = primary;
+  // 二遍拼接（typo_second_pass）：触发时带 del/sub/ins 边重查一遍，结果
+  // 经交错拼接插入首遍候选之后（insert_after 个首遍候选后插入；0=纯追加
+  // 到末尾）。二遍不参与竞争（不抢 top-1），max_sentences=0 关闭二遍组句，
+  // 杜绝纠错边进句子装配。触发策略（2026-10-29 用户拍板）：短输入常开 +
+  // 首遍发现退化顶点（结构断裂信号）。
+  if (typo_second_pass_ &&
+      (enable_deletion_ || enable_substitution_ || enable_insertion_)) {
+    bool short_input =
+        input.length() <=
+        (size_t)typo_second_pass_max_input_length_;  // 默认 12
+    bool degenerate = !input.empty() && primary->input_has_degenerate_vertex();
+    if (short_input || degenerate) {
+      auto second = New<ScriptTranslation>(
+          this, corrector_.get(), poet_.get(), input, segment.start,
+          end_of_input, /*max_sentences=*/0, sentence_cutoff_threshold_,
+          /*second_pass=*/true);
+      if (second &&
+          second->Evaluate(dict_.get(),
+                           enable_user_dict ? user_dict_.get() : NULL)) {
+        if (typo_second_pass_insert_after_ > 0) {
+          result = New<InterleaveTranslation>(
+              primary, second, (size_t)typo_second_pass_insert_after_);
+        } else {
+          auto unioned = New<UnionTranslation>();
+          *unioned += primary;
+          *unioned += second;
+          result = unioned;
+        }
+      }
+    }
   }
   auto deduped = New<DistinctTranslation>(result);
   if (contextual_suggestions_) {

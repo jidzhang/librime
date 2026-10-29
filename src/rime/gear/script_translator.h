@@ -78,6 +78,20 @@ class ScriptTranslator : public Translator,
   // 退化顶点门控（translator/typo_gate_degenerate，默认 false）：del/sub/ins
   // 三边仅在开不出任何全拼拼写的位置触发。
   bool typo_gate_degenerate() const { return typo_gate_degenerate_; }
+  // 二遍拼接（translator/typo_second_pass，默认 false）：首遍不带 del/sub/ins
+  // 边（主列表零污染），触发时二遍带边重查、结果 Union 追加在首遍之后
+  // 不参与竞争（2026-10-29 图内边三连证伪后的隔离流设计）。
+  bool typo_second_pass() const { return typo_second_pass_; }
+  // 二遍触发短输入阈值（translator/typo_second_pass_max_input_length，
+  // 默认 12）：输入长度 <= 该值常开二遍；超过则需首遍发现退化顶点。
+  int typo_second_pass_max_input_length() const {
+    return typo_second_pass_max_input_length_;
+  }
+  // 二遍纠错候选的插入位（translator/typo_second_pass_insert_after，
+  // 默认 5）：首遍前 N 个候选之后插入二遍结果；0 = 纯追加到末尾。
+  int typo_second_pass_insert_after() const {
+    return typo_second_pass_insert_after_;
+  }
   // 纠错门控（translator/typo_gated，默认 false）：首遍无整段精确词才带纠错边重查。
   bool typo_gated() const { return typo_gated_; }
   int max_word_length() const { return max_word_length_; }
@@ -96,6 +110,9 @@ class ScriptTranslator : public Translator,
   bool enable_insertion_ = false;
   double insertion_credibility_ = -4.605170185988091;
   bool typo_gate_degenerate_ = false;
+  bool typo_second_pass_ = false;
+  int typo_second_pass_max_input_length_ = 12;
+  int typo_second_pass_insert_after_ = 5;
   bool typo_gated_ = false;
   int max_homophones_ = 1;
   int spelling_hints_ = 0;

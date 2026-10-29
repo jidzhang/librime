@@ -30,6 +30,7 @@
 #include <rime/gear/simplifier.h>
 #include <rime/gear/single_char_filter.h>
 #include <rime/gear/speller.h>
+#include <rime/gear/streaming_chord_processor.h>
 #include <rime/gear/switch_translator.h>
 #include <rime/gear/table_translator.h>
 #include <rime/gear/uniquifier.h>
@@ -44,7 +45,7 @@ static void rime_gears_initialize() {
 
   // processors
   r.Register("ascii_composer", new Component<AsciiComposer>);
-  r.Register("chord_composer", new Component<ChordComposer>);
+  r.Register("chord_composer", new ChordComposerComponent);
   r.Register("express_editor", new Component<ExpressEditor>);
   r.Register("fluid_editor", new Component<FluidEditor>);
   r.Register("fluency_editor", new Component<FluidEditor>);  // alias
@@ -55,6 +56,8 @@ static void rime_gears_initialize() {
   r.Register("selector", new Component<Selector>);
   r.Register("speller", new Component<Speller>);
   r.Register("shape_processor", new Component<ShapeProcessor>);
+  r.Register("streaming_chord_processor",
+             new Component<StreamingChordProcessor>);
 
   // segmentors
   r.Register("abc_segmentor", new Component<AbcSegmentor>);

@@ -9,10 +9,13 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-26.04-arm
         compiler: [gcc, clang]
         include:
           - compiler: gcc
@@ -22,10 +25,12 @@ jobs:
     env:
       CC: ${{ matrix.compiler }}
       CXX: ${{ matrix.cxx_compiler }}
+      BOOST_ROOT: ${{ github.workspace }}/deps/boost
+      boost_libs: regex
     
     steps:
       - name: Checkout last commit
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.repository }}
 

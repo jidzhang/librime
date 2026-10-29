@@ -3,13 +3,13 @@ RIME_ROOT ?= $(CURDIR)
 RIME_SOURCE_PATH = plugins sample src test tools
 
 OS_NAME = $(shell uname)
-ifeq ($(OS_NAME),Darwin) # for macOS
-prefix ?= $(RIME_ROOT)/dist
-
 ifdef BOOST_ROOT
 CMAKE_BOOST_OPTIONS = -DBoost_NO_BOOST_CMAKE=TRUE \
 	-DBOOST_ROOT="$(BOOST_ROOT)"
 endif
+
+ifeq ($(OS_NAME),Darwin) # for macOS
+prefix ?= $(RIME_ROOT)/dist
 
 # https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_SYSROOT.html
 export SDKROOT ?= $(shell xcrun --sdk macosx --show-sdk-path)
@@ -32,7 +32,7 @@ prefix ?= $(DESTDIR)/usr
 endif
 
 ifndef NOPARALLEL
-export MAKEFLAGS+=" -j$$(( $$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || getconf NPROCESSORS_ONLN 2>/dev/null || echo 8) + 1)) "
+  MAKEFLAGS += -j$(shell expr $$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || getconf NPROCESSORS_ONLN 2>/dev/null || echo 8) + 1)
 endif
 
 debug install-debug uninstall-debug test-debug: build ?= debug
@@ -46,6 +46,7 @@ install-debug uninstall-debug
 all: release
 
 clang-format-lint:
+	clang-format --version
 	find ${RIME_SOURCE_PATH} \! -path 'plugins/*/*' -a \( -name '*.cc' -o -name '*.h' \) | \
 	xargs clang-format -Werror --dry-run || { echo Please lint your code by '"'"make clang-format-apply"'"'.; false; }
 
@@ -68,7 +69,8 @@ librime-static:
 	-DCMAKE_INSTALL_PREFIX=$(prefix) \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DBUILD_STATIC=ON \
-	-DBUILD_SHARED_LIBS=OFF
+	-DBUILD_SHARED_LIBS=OFF \
+	$(CMAKE_BOOST_OPTIONS)
 	cmake --build $(build)
 
 release:
@@ -76,7 +78,8 @@ release:
 	-DCMAKE_INSTALL_PREFIX=$(prefix) \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DBUILD_MERGED_PLUGINS=OFF \
-	-DENABLE_EXTERNAL_PLUGINS=ON
+	-DENABLE_EXTERNAL_PLUGINS=ON \
+	$(CMAKE_BOOST_OPTIONS)
 	cmake --build $(build)
 
 merged-plugins:
@@ -84,7 +87,8 @@ merged-plugins:
 	-DCMAKE_INSTALL_PREFIX=$(prefix) \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DBUILD_MERGED_PLUGINS=ON \
-	-DENABLE_EXTERNAL_PLUGINS=OFF
+	-DENABLE_EXTERNAL_PLUGINS=OFF \
+	$(CMAKE_BOOST_OPTIONS)
 	cmake --build $(build)
 
 debug:
@@ -93,7 +97,8 @@ debug:
 	-DCMAKE_BUILD_TYPE=Debug \
 	-DBUILD_MERGED_PLUGINS=OFF \
 	-DALSO_LOG_TO_STDERR=ON \
-	-DENABLE_EXTERNAL_PLUGINS=ON
+	-DENABLE_EXTERNAL_PLUGINS=ON \
+	$(CMAKE_BOOST_OPTIONS)
 	cmake --build $(build)
 
 install:

@@ -26,9 +26,9 @@ bool is_extended_cjk(uint32_t ch) {
       (ch >= 0x31350 && ch <= 0x323AF) ||  // CJK Unified Ideographs Extension H
       (ch >= 0x2EBF0 && ch <= 0x2EE5F) ||  // CJK Unified Ideographs Extension I
       (ch >= 0x323B0 && ch <= 0x3347F) ||  // CJK Unified Ideographs Extension J
-      (ch >= 0x3300 && ch <= 0x33FF) ||    // CJK Compatibility
-      (ch >= 0xFE30 && ch <= 0xFE4F) ||    // CJK Compatibility Forms
-      (ch >= 0xF900 && ch <= 0xFAFF) ||    // CJK Compatibility Ideographs
+      // (ch >= 0x3300 && ch <= 0x33FF) ||  // CJK Compatibility
+      // (ch >= 0xFE30 && ch <= 0xFE4F) ||  // CJK Compatibility Forms
+      (ch >= 0xF900 && ch <= 0xFAFF) ||  // CJK Compatibility Ideographs
       (ch >= 0x2F800 &&
        ch <= 0x2FA1F))  // CJK Compatibility Ideographs Supplement
     return true;
@@ -100,11 +100,11 @@ CharsetFilter::CharsetFilter(const Ticket& ticket)
 
 an<Translation> CharsetFilter::Apply(an<Translation> translation,
                                      CandidateList* candidates) {
-  if (name_space_.empty() &&
-      !engine_->context()->get_option("extended_charset")) {
+  bool default_ns = name_space_.empty() || name_space_ == "filter";
+  if (default_ns && !engine_->context()->get_option("extended_charset")) {
     return New<CharsetFilterTranslation>(translation);
   }
-  if (!name_space_.empty()) {
+  if (!default_ns) {
     LOG(ERROR) << "charset parameter is unsupported by basic charset_filter";
   }
   return translation;

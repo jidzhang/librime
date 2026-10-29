@@ -71,8 +71,27 @@ class Syllabifier {
     enable_deletion_ = true;
     deletion_credibility_ = credibility;
   }
+  // 邻键替换容错（translator/enable_substitution）：剩余输入第 i 位（i∈{0,1}）
+  // 换成 QWERTY 物理邻键后做前缀搜索，取最长匹配（须覆盖被替换位）。
+  RIME_DLL void EnableSubstitution(double credibility = -4.605170185988091) {
+    enable_substitution_ = true;
+    substitution_credibility_ = credibility;
+  }
+  // 漏打容错（translator/enable_insertion）：剩余输入第 i 位（i∈{0,1}）插入
+  // 任一字母后做前缀搜索，插入字符是虚拟的（边少消耗一个原字符）。
+  RIME_DLL void EnableInsertion(double credibility = -4.605170185988091) {
+    enable_insertion_ = true;
+    insertion_credibility_ = credibility;
+  }
+  // 退化顶点门控（translator/typo_gate_degenerate，默认 false）：删除/替换/
+  // 插入三类纠错边仅在"退化顶点"（该位置开不出任何 kNormalSpelling 匹配，
+  // 即全拼结构已断）触发。换位边不受门控（已产品化）。依据 2026-10-29 d7
+  // 逐句归因：无门控删除边打坏 d5 的 68 句中 23 句直接删除路径有 22 句
+  // 落在非退化顶点，此门可挡；同音排序涟漪随边消失。
+  RIME_DLL void EnableDegenerateGate() { typo_gate_degenerate_ = true; }
   RIME_DLL void SetTypoEdgesEnabled(bool on) {
-    typo_edges_enabled_ = on && (enable_transpose_ || enable_deletion_);
+    typo_edges_enabled_ = on && (enable_transpose_ || enable_deletion_ ||
+                                 enable_substitution_ || enable_insertion_);
   }
 
  protected:
@@ -86,6 +105,11 @@ class Syllabifier {
   double transpose_credibility_ = -4.605170185988091;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;
+  bool enable_substitution_ = false;
+  double substitution_credibility_ = -4.605170185988091;
+  bool enable_insertion_ = false;
+  double insertion_credibility_ = -4.605170185988091;
+  bool typo_gate_degenerate_ = false;
   // 纠错边生效开关（translator/typo_gated 二遍查询用；默认 true=行为同旧）
   bool typo_edges_enabled_ = true;
   Corrector* corrector_ = nullptr;

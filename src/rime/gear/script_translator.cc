@@ -96,6 +96,15 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     if (translator->enable_deletion()) {
       syllabifier_.EnableDeletion(translator->deletion_credibility());
     }
+    if (translator->enable_substitution()) {
+      syllabifier_.EnableSubstitution(translator->substitution_credibility());
+    }
+    if (translator->enable_insertion()) {
+      syllabifier_.EnableInsertion(translator->insertion_credibility());
+    }
+    if (translator->typo_gate_degenerate()) {
+      syllabifier_.EnableDegenerateGate();
+    }
     if (translator->typo_gated()) {
       // 门控模式：首遍不带纠错边，由 ScriptTranslation 按候选质量决定重查
       syllabifier_.SetTypoEdgesEnabled(false);
@@ -221,6 +230,15 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
     config->GetBool(name_space_ + "/typo_gated", &typo_gated_);
     config->GetDouble(name_space_ + "/deletion_credibility",
                       &deletion_credibility_);
+    config->GetBool(name_space_ + "/enable_substitution",
+                    &enable_substitution_);
+    config->GetDouble(name_space_ + "/substitution_credibility",
+                      &substitution_credibility_);
+    config->GetBool(name_space_ + "/enable_insertion", &enable_insertion_);
+    config->GetDouble(name_space_ + "/insertion_credibility",
+                      &insertion_credibility_);
+    config->GetBool(name_space_ + "/typo_gate_degenerate",
+                    &typo_gate_degenerate_);
     if (!config->GetBool(name_space_ + "/enable_word_completion",
                          &enable_word_completion_)) {
       enable_word_completion_ = enable_completion_;

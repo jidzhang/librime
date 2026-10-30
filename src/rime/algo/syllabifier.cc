@@ -144,7 +144,10 @@ int Syllabifier::BuildSyllableGraph(const string& input,
 
     // see where we can go by advancing a syllable
     vector<Prism::Match> matches;
-    set<SyllableId> exact_match_syllables;
+    // 正常匹配按 (value, 长度) 记录：纠错边常产出与正常匹配同 value 的音节，
+    // 但跨度不同（删除 +1 / 插入 -1），若只按 value 判会把它当成正常边——
+    // 无惩罚、对 IsCorrection 不可见、可参与组句。跨度相同才算真正的重复边。
+    set<pair<SyllableId, size_t>> exact_matches;
     std::string_view current_input(input.data() + begin_pos,
                                    input.length() - begin_pos);
     if (canonicalizer_) {
@@ -170,7 +173,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
                               enable_insertion_;
     if (correction_enabled) {
       for (auto& m : matches) {
-        exact_match_syllables.insert(m.value);
+        exact_matches.insert({m.value, m.length});
       }
     }
     // 退化顶点跟踪（二遍拼接的信号）：仅在顶点仍有剩余输入时判定——终止
@@ -322,8 +325,8 @@ int Syllabifier::BuildSyllableGraph(const string& input,
             props.end_pos = end_pos;
             // add a syllable with properties to the edge's
             // spelling-to-syllable map
-            if (correction_enabled && exact_match_syllables.find(m.value) ==
-                                          exact_match_syllables.end()) {
+            if (correction_enabled &&
+                !exact_matches.count({m.value, m.length})) {
               props.is_correction = true;
               auto credit = correction_values.find(m.value);
               props.credibility = credit != correction_values.end()

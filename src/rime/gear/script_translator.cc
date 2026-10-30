@@ -95,30 +95,19 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     if (translator->enable_transpose()) {
       syllabifier_.EnableTranspose(translator->transpose_credibility());
     }
-    // 二遍拼接（typo_second_pass）：del/sub/ins 三边只在二遍开——首遍
-    // 保持纯净（主列表零污染），二遍结果由 Query 层 Union 追加不竞争。
+    // 二遍拼接：del/sub/ins 三边只在二遍开，首遍保持纯净（主列表零污染）。
     if (second_pass || !translator->typo_second_pass()) {
       if (translator->enable_deletion()) {
         syllabifier_.EnableDeletion(translator->deletion_credibility());
       }
       if (translator->enable_substitution()) {
-        syllabifier_.EnableSubstitution(translator->substitution_credibility(),
-                                      translator->substitution_horizontal_only());
+        syllabifier_.EnableSubstitution(translator->substitution_credibility());
       }
       if (translator->enable_insertion()) {
         syllabifier_.EnableInsertion(translator->insertion_credibility());
       }
     } else {
-      // 首遍记录退化顶点，作为长输入的二遍触发信号
-      syllabifier_.EnableDegenerateTracking();
-    }
-    if (translator->typo_gate_degenerate() && !translator->typo_second_pass()) {
-      // 图内门控实验模式（2026-10-29 证伪留档），与二遍拼接互斥
-      syllabifier_.EnableDegenerateGate();
-    }
-    if (translator->typo_gated()) {
-      // 门控模式：首遍不带纠错边，由 ScriptTranslation 按候选质量决定重查
-      syllabifier_.SetTypoEdgesEnabled(false);
+      syllabifier_.EnableDegenerateTracking();  // 首遍记录二遍触发信号
     }
   }
   void ClearGraph() {
@@ -128,13 +117,10 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     syllable_graph_.input_length = 0;
     syllable_graph_.interpreted_length = 0;
   }
-  void EnableTypoEdgesForRetry() { syllabifier_.SetTypoEdgesEnabled(true); }
-  bool has_degenerate_vertex() const {
-    return syllabifier_.has_degenerate_vertex();
+  bool HasDegenerateVertex() const {
+    return syllabifier_.HasDegenerateVertex();
   }
-  bool has_normal_vertex() const {
-    return syllabifier_.has_normal_vertex();
-  }
+  bool HasNormalVertex() const { return syllabifier_.HasNormalVertex(); }
   bool IsNormalPinyinPrefix(Prism& prism) {
     return syllabifier_.IsNormalPinyinPrefix(input_, prism);
   }
@@ -157,16 +143,14 @@ class ScriptSyllabifier : public PhraseSyllabifier {
 
 // 交错拼接（typo_second_pass_insert_after）：首遍候选先出 insert_after 个，
 // 然后二遍纠错候选插进来出尽，再回到首遍续播。纠错候选不参与竞争
-//（不抢首遍 top-1），但保证落在第一页可见区；纯 Union 追加会把
+// （不抢首遍 top-1），但保证落在第一页可见区；纯 Union 追加会把
 // 纠错词沉到首遍几十个候选之后，用户翻页都翻不到。
 class InterleaveTranslation : public Translation {
  public:
   InterleaveTranslation(const an<Translation>& primary,
                         const an<Translation>& secondary,
                         size_t insert_after)
-      : primary_(primary),
-        secondary_(secondary),
-        insert_after_(insert_after) {
+      : primary_(primary), secondary_(secondary), insert_after_(insert_after) {
     current_ = primary_;
     if (primary_ && primary_->exhausted()) {
       if (secondary_ && !secondary_->exhausted()) {
@@ -240,8 +224,11 @@ class ScriptTranslation : public Translation {
         poet_(poet),
         start_(start),
         end_of_input_(end_of_input),
-        syllabifier_(New<ScriptSyllabifier>(translator, corrector, input,
-                                            start, second_pass)),
+        syllabifier_(New<ScriptSyllabifier>(translator,
+                                            corrector,
+                                            input,
+                                            start,
+                                            second_pass)),
         enable_correction_(corrector),
         max_sentences_(max_sentences),
         sentence_cutoff_threshold_(sentence_cutoff_threshold) {
@@ -249,20 +236,18 @@ class ScriptTranslation : public Translation {
   }
   bool Evaluate(Dictionary* dict, UserDictionary* user_dict);
   bool EvaluateWithGraph(Dictionary* dict, UserDictionary* user_dict);
-  // 首遍音节图是否出现退化顶点（typo_second_pass 长输入二遍触发信号）
-  bool input_has_degenerate_vertex() const {
-    return syllabifier_->has_degenerate_vertex();
+  // 首遍音节图是否出现退化顶点（长输入的二遍触发信号）
+  bool InputHasDegenerateVertex() const {
+    return syllabifier_->HasDegenerateVertex();
   }
-  // 输入是否含全拼顶点（二遍触发前置：纯简拼全顶点退化，不跑二遍）
-  bool input_has_normal_vertex() const {
-    return syllabifier_->has_normal_vertex();
-  }
-  // 输入能否被全拼解释掉（质量门：能解释=用户还在正常打字，不纠错）
-  bool input_is_normal_pinyin_prefix(Prism& prism) {
+  // 输入是否含全拼顶点（纯简拼全顶点退化，不跑二遍）
+  bool InputHasNormalVertex() const { return syllabifier_->HasNormalVertex(); }
+  // 输入能否被全拼解释掉（质量门：能解释=用户还在正常打字/补全中）
+  bool InputIsNormalPinyinPrefix(Prism& prism) {
     return syllabifier_->IsNormalPinyinPrefix(prism);
   }
   // 整串是否被某个词典词完整覆盖（含简拼）：是=输入有明确含义，不纠错
-  bool input_has_covering_word() const { return had_covering_phrase_; }
+  bool InputHasCoveringWord() const { return had_covering_phrase_; }
   virtual bool Next();
   virtual an<Candidate> Peek();
 
@@ -311,7 +296,6 @@ class ScriptTranslation : public Translation {
   bool had_reliable_phrase_ = false;
   bool had_covering_phrase_ = false;
   bool had_reliable_user_phrase_ = false;
-  bool typo_retry_done_ = false;
   // 本次组句是否经由 abbrev_sentences 门控（决定 quality 加成是否应用）
   bool abbrev_gate_fired_ = false;
 };
@@ -333,25 +317,15 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
     config->GetDouble(name_space_ + "/transpose_credibility",
                       &transpose_credibility_);
     config->GetBool(name_space_ + "/enable_deletion", &enable_deletion_);
-    config->GetBool(name_space_ + "/typo_gated", &typo_gated_);
     config->GetDouble(name_space_ + "/deletion_credibility",
                       &deletion_credibility_);
     config->GetBool(name_space_ + "/enable_substitution",
                     &enable_substitution_);
     config->GetDouble(name_space_ + "/substitution_credibility",
                       &substitution_credibility_);
-    {
-      string neighbors;
-      if (config->GetString(name_space_ + "/substitution_neighbors",
-                            &neighbors)) {
-        substitution_horizontal_only_ = (neighbors == "horizontal");
-      }
-    }
     config->GetBool(name_space_ + "/enable_insertion", &enable_insertion_);
     config->GetDouble(name_space_ + "/insertion_credibility",
                       &insertion_credibility_);
-    config->GetBool(name_space_ + "/typo_gate_degenerate",
-                    &typo_gate_degenerate_);
     config->GetBool(name_space_ + "/typo_second_pass", &typo_second_pass_);
     config->GetInt(name_space_ + "/typo_second_pass_max_input_length",
                    &typo_second_pass_max_input_length_);
@@ -409,47 +383,28 @@ an<Translation> ScriptTranslator::Query(const string& input,
   an<Translation> result = primary;
   // 二遍拼接（typo_second_pass）：触发时带 del/sub/ins 边重查一遍，结果
   // 经交错拼接插入首遍候选之后（insert_after 个首遍候选后插入；0=纯追加
-  // 到末尾）。二遍不参与竞争（不抢 top-1），max_sentences=0 关闭二遍组句，
-  // 杜绝纠错边进句子装配。触发策略（2026-10-29 用户拍板）：短输入常开 +
-  // 首遍发现退化顶点（结构断裂信号）。
-  if (typo_second_pass_ &&
-      (enable_deletion_ || enable_substitution_ || enable_insertion_)) {
-    // 前置：输入须含全拼顶点——纯简拼（jp2/d6 画像）全顶点退化，
-    // 跑二遍只添扰动（jp2 实测 −0.55）与开销，直接跳过。
-    if (primary->input_has_normal_vertex()) {
-      bool short_input =
-          input.length() <=
-          (size_t)typo_second_pass_max_input_length_;  // 默认 12
-      bool degenerate =
-          !input.empty() && primary->input_has_degenerate_vertex();
-      // 质量门（2026-10-29 用户定"纠错不要做过了"）：输入能按全拼解释掉
-      //（整串合法，或尾巴是某音节前缀如 wofe→wofei）说明候选已贴近目标，
-      // 不触发纠错，避免把 我飞 的输入注入 我的。
-      bool normal_prefix =
-          typo_second_pass_skip_normal_prefix_ &&
-          primary->input_is_normal_pinyin_prefix(*dict_->prism());
-      // 整串被词典词吃掉（wlde→未来的/无聊的）→ 视为候选已贴近目标，不纠错
-      bool covered = typo_second_pass_skip_normal_prefix_ &&
-                     primary->input_has_covering_word();
-      if ((short_input || degenerate) && !normal_prefix && !covered) {
+  // 二遍拼接：首遍候选先出 insert_after 个，纠错候选插进来，再回首遍续播。
+  // 不抢 top-1（主列表零污染），max_sentences=0 关闭二遍组句。触发门槛：
+  // 输入含全拼顶点（纯简拼不跑）+ 短输入或结构断裂 + 两道质量门未拦
+  // （能按全拼解释 / 能被词典词整串吃掉 = 候选已贴近目标，不纠错）。
+  if (typo_second_pass_ && typo_second_pass_insert_after_ > 0 &&
+      (enable_deletion_ || enable_substitution_ || enable_insertion_) &&
+      primary->InputHasNormalVertex() &&
+      (input.length() <= (size_t)typo_second_pass_max_input_length_ ||
+       primary->InputHasDegenerateVertex())) {
+    bool skip = typo_second_pass_skip_normal_prefix_ &&
+                (primary->InputIsNormalPinyinPrefix(*dict_->prism()) ||
+                 primary->InputHasCoveringWord());
+    if (!skip) {
       auto second = New<ScriptTranslation>(
           this, corrector_.get(), poet_.get(), input, segment.start,
           end_of_input, /*max_sentences=*/0, sentence_cutoff_threshold_,
           /*second_pass=*/true);
-      if (second &&
-          second->Evaluate(dict_.get(),
+      if (second->Evaluate(dict_.get(),
                            enable_user_dict ? user_dict_.get() : NULL)) {
-        if (typo_second_pass_insert_after_ > 0) {
-          result = New<InterleaveTranslation>(
-              primary, second, (size_t)typo_second_pass_insert_after_);
-        } else {
-          auto unioned = New<UnionTranslation>();
-          *unioned += primary;
-          *unioned += second;
-          result = unioned;
-        }
+        result = New<InterleaveTranslation>(
+            primary, second, (size_t)typo_second_pass_insert_after_);
       }
-    }
     }
   }
   auto deduped = New<DistinctTranslation>(result);
@@ -676,22 +631,11 @@ static bool has_exact_match_phrase(Ptr ptr, Iter iter, size_t consumed) {
 // ScriptTranslation implementation
 
 bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
-  bool ok = EvaluateWithGraph(dict, user_dict);
-  // 纠错门控（translator/typo_gated）：首遍无整段精确匹配词（错字输入特征）
-  // 时，带纠错边重建音节图重查一遍。有效输入零纠错开销与污染。
-  if (translator_->typo_gated() && !typo_retry_done_ &&
-      (!ok || (!had_reliable_phrase_ && !had_reliable_user_phrase_))) {
-    typo_retry_done_ = true;
-    syllabifier_->EnableTypoEdgesForRetry();
-    syllabifier_->ClearGraph();
-    if (EvaluateWithGraph(dict, user_dict))
-      return true;
-  }
-  return ok;
+  return EvaluateWithGraph(dict, user_dict);
 }
 
-bool ScriptTranslation::EvaluateWithGraph(Dictionary* dict, UserDictionary* user_dict) {
-  typo_retry_done_ = typo_retry_done_;  // 状态位在包装层维护
+bool ScriptTranslation::EvaluateWithGraph(Dictionary* dict,
+                                          UserDictionary* user_dict) {
   size_t consumed = syllabifier_->BuildSyllableGraph(*dict->prism());
   const auto& syllable_graph = syllabifier_->syllable_graph();
   bool predict_word = translator_->enable_word_completion() &&
@@ -723,13 +667,11 @@ bool ScriptTranslation::EvaluateWithGraph(Dictionary* dict, UserDictionary* user
   bool has_reliable_phrase =
       has_exact_match_phrase(phrase_, phrase_iter_, consumed) &&
       !is_correction_match(*phrase_iter_, consumed);
-  // 整串被词典词吃掉（允许简拼/补全拼写）：说明用户输入本身有明确含义，
-  // 属"候选已贴近目标"，二遍纠错不该介入（2026-10-29 用户定：
-  // wlde→未来的/无聊的/我懒得 比 我的 更合理，不该纠错）。
-  had_covering_phrase_ =
-      phrase_ && phrase_iter_->first == consumed &&
-      !phrase_iter_->second.exhausted() &&
-      !is_correction_match(*phrase_iter_, consumed);
+  // 整串被词典词吃掉（允许简拼/补全拼写）：用户输入本身有明确含义，
+  // 属"候选已贴近目标"，二遍纠错不该介入（如 wlde 应给 未来的/我懒得）。
+  had_covering_phrase_ = phrase_ && phrase_iter_->first == consumed &&
+                         !phrase_iter_->second.exhausted() &&
+                         !is_correction_match(*phrase_iter_, consumed);
 
   bool has_reliable_user_phrase =
       has_exact_match_phrase(user_phrase_, user_phrase_iter_, consumed) &&
@@ -762,10 +704,10 @@ bool ScriptTranslation::EvaluateWithGraph(Dictionary* dict, UserDictionary* user
   }
   DLOG(INFO) << "sentence gate:"
              << " consumed=" << consumed
-            << " reliable_phrase=" << has_reliable_phrase
-            << " reliable_user=" << has_reliable_user_phrase
-            << " two_syl=" << has_at_least_two_syllables
-            << " abbrev_input=" << has_abbrev_input;
+             << " reliable_phrase=" << has_reliable_phrase
+             << " reliable_user=" << has_reliable_user_phrase
+             << " two_syl=" << has_at_least_two_syllables
+             << " abbrev_input=" << has_abbrev_input;
   // make sentences when there is no exact-matching phrase candidate
   abbrev_gate_fired_ = has_abbrev_input && has_full_input &&
                        translator_->abbrev_sentences() && has_reliable_phrase;
@@ -880,11 +822,11 @@ iter_incremented:
     // 公式补设（B 为对数平移，保持句子间按权重排序）；默认 0 = 不设，
     // 完全保持上游行为。实验记录：B=0（仅 exp(weight)）使混合 +1.0，
     // 但会把低权垃圾句（hello→和来咯）抬到英文之上，未定档。
-    double boost = abbrev_gate_fired_ ? translator_->sentence_quality_boost() : 0.;
+    double boost =
+        abbrev_gate_fired_ ? translator_->sentence_quality_boost() : 0.;
     if (boost != 0.) {
-      sentences_[0]->set_quality(
-          std::exp(sentences_[0]->weight() + boost) +
-          translator_->initial_quality());
+      sentences_[0]->set_quality(std::exp(sentences_[0]->weight() + boost) +
+                                 translator_->initial_quality());
     }
     return true;
   }

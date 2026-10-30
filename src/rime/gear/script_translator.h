@@ -50,11 +50,11 @@ class ScriptTranslator : public Translator,
   int spelling_hints() const { return spelling_hints_; }
   bool always_show_comments() const { return always_show_comments_; }
   // 简拼/混合输入时，即使存在整段精确匹配词也构建组句候选
-  //（translator/abbrev_sentences，需 grammar 支持，默认关）。
+  // （translator/abbrev_sentences，需 grammar 支持，默认关）。
   bool abbrev_sentences() const { return abbrev_sentences_; }
   // 混合输入下句子候选的质量加成（translator/sentence_quality_boost，默认 0）。
   // 句子候选此前从未设置 quality（默认 0），跨翻译器合并时系统性吃亏
-  //（如 英文词 der 压过 的人）。仅在 abbrev_sentences 门控触发时应用，
+  // （如 英文词 der 压过 的人）。仅在 abbrev_sentences 门控触发时应用，
   // 不影响全拼组句的既有平衡。
   double sentence_quality_boost() const { return sentence_quality_boost_; }
   bool enable_word_completion() const { return enable_word_completion_; }
@@ -70,22 +70,13 @@ class ScriptTranslator : public Translator,
   // 邻键替换容错（translator/enable_substitution + substitution_credibility，
   // 默认关）：d7 打错键场景，QWERTY 物理邻键替换的纠错边。
   bool enable_substitution() const { return enable_substitution_; }
-  // 替换边邻键范围（translator/substitution_neighbors=horizontal 时只取
-  // 同行左右；默认几何全向含斜向）。
-  bool substitution_horizontal_only() const {
-    return substitution_horizontal_only_;
-  }
   double substitution_credibility() const { return substitution_credibility_; }
   // 漏打容错（translator/enable_insertion + insertion_credibility，默认关）：
   // d7 少打字母场景，虚拟插入一个字母的纠错边。
   bool enable_insertion() const { return enable_insertion_; }
   double insertion_credibility() const { return insertion_credibility_; }
-  // 退化顶点门控（translator/typo_gate_degenerate，默认 false）：del/sub/ins
-  // 三边仅在开不出任何全拼拼写的位置触发。
-  bool typo_gate_degenerate() const { return typo_gate_degenerate_; }
   // 二遍拼接（translator/typo_second_pass，默认 false）：首遍不带 del/sub/ins
-  // 边（主列表零污染），触发时二遍带边重查、结果 Union 追加在首遍之后
-  // 不参与竞争（2026-10-29 图内边三连证伪后的隔离流设计）。
+  // 边（主列表零污染），触发时二遍带边重查，结果插在首遍候选之后不竞争。
   bool typo_second_pass() const { return typo_second_pass_; }
   // 二遍触发短输入阈值（translator/typo_second_pass_max_input_length，
   // 默认 12）：输入长度 <= 该值常开二遍；超过则需首遍发现退化顶点。
@@ -102,8 +93,6 @@ class ScriptTranslator : public Translator,
   bool typo_second_pass_skip_normal_prefix() const {
     return typo_second_pass_skip_normal_prefix_;
   }
-  // 纠错门控（translator/typo_gated，默认 false）：首遍无整段精确词才带纠错边重查。
-  bool typo_gated() const { return typo_gated_; }
   int max_word_length() const { return max_word_length_; }
   int core_word_length() const;
   Projection* canonicalizer() const { return canonicalizer_.get(); }
@@ -117,15 +106,12 @@ class ScriptTranslator : public Translator,
   double deletion_credibility_ = -4.605170185988091;
   bool enable_substitution_ = false;
   double substitution_credibility_ = -4.605170185988091;
-  bool substitution_horizontal_only_ = false;
   bool enable_insertion_ = false;
   double insertion_credibility_ = -4.605170185988091;
-  bool typo_gate_degenerate_ = false;
   bool typo_second_pass_ = false;
   int typo_second_pass_max_input_length_ = 12;
   int typo_second_pass_insert_after_ = 5;
   bool typo_second_pass_skip_normal_prefix_ = true;
-  bool typo_gated_ = false;
   int max_homophones_ = 1;
   int spelling_hints_ = 0;
   int max_word_length_ = 0;

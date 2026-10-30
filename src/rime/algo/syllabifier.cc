@@ -28,31 +28,19 @@ using VertexQueue =
 const double kCompletionPenalty = -2.995732273553991;      // log(0.05)
 const double kCorrectionCredibility = -4.605170185988091;  // log(0.01)
 
-// QWERTY 物理邻键表（d7 口径，2026-10-29）：上/中/下三行按 0.5 键宽错位，
-// 欧氏距离 <=1.2 键宽为邻。'a' -> q/s/w/z，与评测注入器 probe-neighbor.go
-// 同一几何，保证"注入什么就修什么"。librime 自带 corrector.cc 的
-// keyboard_map 只有同行左右邻（'a'->'s'），不覆盖上下行，故此处独立成表。
-// 水平邻键表（同行左右，libime/librime 口径；斜向在真实键盘上争议大，
-// 2026-10-29 做成可选项 substitution_neighbors=horizontal 供扫参）。
-static const char* const kQwertyNeighborsHorizontal[26] = {
-    /* a */ "s",  /* b */ "vn", /* c */ "xv", /* d */ "sf", /* e */ "wr",
-    /* f */ "dg", /* g */ "fh", /* h */ "gj", /* i */ "uo", /* j */ "hk",
-    /* k */ "jl", /* l */ "k",  /* m */ "n",  /* n */ "bm", /* o */ "ip",
-    /* p */ "o",  /* q */ "w",  /* r */ "et", /* s */ "ad", /* t */ "ry",
-    /* u */ "yi", /* v */ "cb", /* w */ "qe", /* x */ "zc", /* y */ "tu",
-    /* z */ "x",
-};
-
+// QWERTY 物理邻键表：上/中/下三行按 0.5 键宽错位，欧氏距离 <=1.2 键宽为邻
+// （'a' -> q/s/w/z）。corrector.cc 的 keyboard_map 只有同行左右邻，不覆盖
+// 上下行，故此处独立成表；评测注入器 probe-neighbor.go 用同一几何。
 static const char* const kQwertyNeighbors[26] = {
-    /* a */ "qswz",          /* b */ "ghnv",         /* c */ "dfvx",
-    /* d */ "cefrsx",        /* e */ "drsw",         /* f */ "cdgrtv",
-    /* g */ "bfhtvy",        /* h */ "bgjnuy",       /* i */ "jkou",
-    /* j */ "hikmnu",        /* k */ "ijlmo",        /* l */ "kop",
-    /* m */ "jkn",           /* n */ "bhjm",         /* o */ "iklp",
-    /* p */ "lo",            /* q */ "aw",           /* r */ "deft",
-    /* s */ "adewxz",        /* t */ "fgry",         /* u */ "hijy",
-    /* v */ "bcfg",          /* w */ "aeqs",         /* x */ "cdsz",
-    /* y */ "ghtu",          /* z */ "asx",
+    /* a */ "qswz",   /* b */ "ghnv",   /* c */ "dfvx",
+    /* d */ "cefrsx", /* e */ "drsw",   /* f */ "cdgrtv",
+    /* g */ "bfhtvy", /* h */ "bgjnuy", /* i */ "jkou",
+    /* j */ "hikmnu", /* k */ "ijlmo",  /* l */ "kop",
+    /* m */ "jkn",    /* n */ "bhjm",   /* o */ "iklp",
+    /* p */ "lo",     /* q */ "aw",     /* r */ "deft",
+    /* s */ "adewxz", /* t */ "fgry",   /* u */ "hijy",
+    /* v */ "bcfg",   /* w */ "aeqs",   /* x */ "cdsz",
+    /* y */ "ghtu",   /* z */ "asx",
 };
 
 namespace {
@@ -71,21 +59,29 @@ bool Syllabifier::IsNormalPinyinPrefix(const string& input, Prism& prism) {
   if (input.empty())
     return true;
   const size_t n = input.length();
-  // reach[i] = 前 i 个字符能被全拼音节完整覆盖
+  // reach[i] = 前 i 个字符能被全拼音节完整覆盖（跳过分隔符，与图构建同口径）
   vector<char> reach(n + 1, 0);
   reach[0] = 1;
-  size_t farthest = 0;
+  size_t farthest = 0;  // 最远的可达覆盖点
+  vector<Prism::Match> matches;
   for (size_t i = 0; i < n; ++i) {
     if (!reach[i])
       continue;
-    if (i > farthest)
+    farthest = i;
+    while (i + 1 < n && delimiters_.find(input[i + 1]) != string::npos &&
+           reach[i + 1]) {
+      // 分隔符不消耗语音，直接继承可达性
+      reach[i + 1] = 1;
+      ++i;
       farthest = i;
-    vector<Prism::Match> matches;
-    prism.CommonPrefixSearch(input.substr(i), &matches);
+    }
+    if (delimiters_.find(input[i]) != string::npos)
+      continue;
+    matches.clear();
+    prism.CommonPrefixSearch(std::string_view(input).substr(i), &matches);
     for (const auto& m : matches) {
       // 单字母音节（a/o/e/m/n）不能当"完整音节"用：否则 womn（我们漏打）
-      // 会被读成 wo+m+n 而判成"还在打字"，漏打场景全部失效。它只允许
-      // 出现在末尾的补全位（由下面的 trie 尾巴判定处理）。
+      // 会被读成 wo+m+n 而判成"还在打字"。它只允许出现在末尾补全位。
       if (m.length < 2 || i + m.length > n)
         continue;
       if (!SpellingIsNormal(prism, m.value))
@@ -95,21 +91,15 @@ bool Syllabifier::IsNormalPinyinPrefix(const string& input, Prism& prism) {
   }
   if (reach[n])
     return true;  // 整串就是合法全拼
-  for (size_t i = n; i > farthest; --i) {
-    if (!reach[i])
-      continue;
-    farthest = i;
-  }
-  // 尾巴是否为某个全拼音节的前缀（Darts trie 逐字符下行；
-  // traverse 返回 -2=无路径，-1=节点存在但非拼写终点（仍是合法前缀），
-  // >=0=命中拼写终点。两种非 -2 都算"prefix"。
-  if (farthest >= n)
-    return true;
+  // 尾巴是否为某个全拼音节的前缀：Darts traverse 的 key_pos 是入出参
+  // （调用后推进到 length），必须用独立游标，不能把循环变量传进去。
   auto& trie = prism.trie();
   size_t node = 0;
   for (size_t i = farthest; i < n; ++i) {
-    int val = trie.traverse(input.c_str(), node, i, i + 1);
-    if (val == -2)
+    if (delimiters_.find(input[i]) != string::npos)
+      continue;
+    size_t pos = i;
+    if (trie.traverse(input.c_str(), node, pos, i + 1) == -2)
       return false;  // 无路径：不可能是任何音节的前缀
   }
   return true;
@@ -118,11 +108,11 @@ bool Syllabifier::IsNormalPinyinPrefix(const string& input, Prism& prism) {
 int Syllabifier::BuildSyllableGraph(const string& input,
                                     Prism& prism,
                                     SyllableGraph* graph) {
+  found_degenerate_vertex_ = false;
+  found_normal_vertex_ = false;
   if (input.empty())
     return 0;
 
-  found_degenerate_vertex_ = false;
-  found_normal_vertex_ = false;
   size_t farthest = 0;
   VertexQueue queue;
   queue.push(Vertex{0, kNormalSpelling});  // start
@@ -183,31 +173,14 @@ int Syllabifier::BuildSyllableGraph(const string& input,
         exact_match_syllables.insert(m.value);
       }
     }
-    // 退化顶点判定：该位置开不出任何全拼拼写（kNormalSpelling，含
-    // a/o/e/m/n 单字母音节）→ 全拼结构已断，是"用户打错了"的结构信号。
-    // 两个用途：① typo_gate_degenerate 图内门控（2026-10-29 实测证伪留档，
-    // 挡不住跨音节歧义位置的新损伤）；② typo_second_pass 二遍触发信号
-    //（首遍记录，供翻译层对长输入按需跑二遍）。
-    bool gated_edges_allowed = true;
-    bool need_degeneracy = (typo_gate_degenerate_ || track_degenerate_vertex_) &&
-                           typo_edges_enabled_;
-    if (need_degeneracy) {
-      // 退化=开不出任何全拼；全拼证据=存在 >=2 字符的全拼匹配（单字母
-      // a/e/o/m/n 音节不算——简拼首字母命中它会漏放 jp2 类输入）。
+    // 退化顶点跟踪（二遍拼接的信号）：仅在顶点仍有剩余输入时判定——终止
+    // 顶点没有匹配是构造使然，不得计入，否则任何完整输入都会被当成"结构
+    // 断裂"触发二遍。
+    if (track_degenerate_vertex_ && !current_input.empty()) {
       bool vertex_degenerate = true;
       bool vertex_ge2_normal = false;
       for (const auto& m : matches) {
-        if (m.length == 0)
-          continue;
-        bool m_normal = false;
-        for (auto accessor = prism.QuerySpelling(m.value);
-             !accessor.exhausted(); accessor.Next()) {
-          if (accessor.properties().type == kNormalSpelling) {
-            m_normal = true;
-            break;
-          }
-        }
-        if (!m_normal)
+        if (m.length == 0 || !SpellingIsNormal(prism, m.value))
           continue;
         vertex_degenerate = false;
         if (m.length >= 2) {
@@ -219,7 +192,6 @@ int Syllabifier::BuildSyllableGraph(const string& input,
         found_degenerate_vertex_ = true;
       else if (vertex_ge2_normal)
         found_normal_vertex_ = true;
-      gated_edges_allowed = !vertex_degenerate;
     }
     if (corrector_) {
       Corrections corrections;
@@ -236,134 +208,87 @@ int Syllabifier::BuildSyllableGraph(const string& input,
         }
       }
     }
-    // 换位容错（enable_transpose）：对剩余输入的相邻字符互换变体做前缀搜索。
-    // 位置 i 的换位变体只接受长度 > i+1 的匹配（须同时覆盖两个被换字符，
-    // 否则与正常搜索重复）。命中走纠错边（is_correction + credibility 惩罚）；
-    // 若正常拼写已覆盖该音节，下方 spellings 合并时 correction 自然被忽略。
-    set<int> transposed_match_values;
-    set<int> deleted_match_values;
-    set<int> substituted_match_values;
-    set<int> inserted_match_values;
-    if (enable_transpose_ && typo_edges_enabled_) {
-      // 只试前两个换位点：简拼边使每个位置都是图顶点，任意位置的换位都
-      // 能从其起始顶点以 i=0（或前一顶点 i=1）覆盖；全长度枚举实测使每键
-      // 延迟 +40%（O(n^3) trie 步），限两位后与正常搜索同量级。
+    // 纠错边（换位/多打/邻键打错/漏打）：在剩余输入前两位上生成变体、取最长
+    // 匹配后按纠正边入图（is_correction + credibility 惩罚）。只试前两位：
+    // 简拼边使每个位置都是图顶点，任意位置都能由起始顶点 i∈{0,1} 覆盖；
+    // 全长度枚举实测每键 +40% 延迟。correction_values 先到先得，保持换位
+    // 惩罚优先级最高。
+    std::map<int, double> correction_values;
+    vector<Prism::Match> tmatches;
+    auto add_correction_edge = [&](const string& key, size_t min_len,
+                                   int len_delta, double credibility) {
+      tmatches.clear();
+      prism.CommonPrefixSearch(key, &tmatches);
+      const Prism::Match* best = nullptr;
+      for (const auto& m : tmatches) {
+        if (m.length < min_len)
+          continue;
+        if (!best || m.length > best->length)
+          best = &m;
+      }
+      if (!best)
+        return;
+      Prism::Match m = *best;
+      if (len_delta > 0) {
+        m.length += len_delta;  // 边多消费被删/被覆盖的原字符
+      } else if (len_delta < 0) {
+        if (m.length < static_cast<size_t>(-len_delta))
+          return;
+        m.length -= static_cast<size_t>(-len_delta);  // 插入字符是虚拟的
+      }
+      if (m.length == 0)
+        return;
+      correction_values.emplace(m.value, credibility);
+      matches.push_back(m);
+    };
+    if (enable_transpose_) {
+      // 换位：相邻两字符互换，匹配须覆盖被换的两字符（>= i+2）。
       for (size_t i = 0; i + 1 < current_input.size() && i < 2; ++i) {
         if (current_input[i] == current_input[i + 1] ||
             delimiters_.find(current_input[i]) != string::npos ||
-            delimiters_.find(current_input[i + 1]) != string::npos) {
+            delimiters_.find(current_input[i + 1]) != string::npos)
           continue;
-        }
         string key(current_input);
         std::swap(key[i], key[i + 1]);
-        vector<Prism::Match> tmatches;
-        prism.CommonPrefixSearch(key, &tmatches);
-        // 每个换位只取最长匹配：多前缀匹配会按候选数平方放大翻译开销
-        //（实测每键 +40% 延迟），最长拼写通常即用户意图音节。
-        const Prism::Match* best = nullptr;
-        for (const auto& m : tmatches) {
-          if (m.length == 0 || m.length <= i + 1)
-            continue;
-          if (!best || m.length > best->length)
-            best = &m;
-        }
-        if (best) {
-          transposed_match_values.insert(best->value);
-          matches.push_back(*best);
-        }
+        add_correction_edge(key, i + 2, 0, transpose_credibility_);
       }
     }
-    // 漏字容错（用户多打了一个键）：剩余输入删去第 i 位（i∈{0,1}，顶点密度
-    // 同换位论证）后做前缀搜索。命中的边需多消耗一个原字符：push length+1
-    // 使 end_pos 正确。只取最长匹配（同换位的延迟教训）。
-    // typo_gate_degenerate 开启时仅退化顶点触发。
-    if (enable_deletion_ && typo_edges_enabled_ && gated_edges_allowed) {
+    if (enable_deletion_) {
+      // 多打一个键：删去第 i 位后搜索，边多消费一个原字符（+1）。
+      // 匹配须 >=2 且越过删除点，否则单字母音节会产出垃圾边（实测 +89%）。
       for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
         if (delimiters_.find(current_input[i]) != string::npos)
           continue;
         string key(current_input);
         key.erase(i, 1);
-        vector<Prism::Match> tmatches;
-        prism.CommonPrefixSearch(key, &tmatches);
-        const Prism::Match* best = nullptr;
-        for (const auto& m : tmatches) {
-          // 长度必须 >=2 且越过删除点：单字符匹配（o/w 等单字母音节）
-          // 会在每个顶点产出垃圾纠错边，候选路径爆炸（实测每键 +89%）。
-          if (m.length < 2 || m.length <= i)
-            continue;
-          if (!best || m.length > best->length)
-            best = &m;
-        }
-        if (best) {
-          deleted_match_values.insert(best->value);
-          Prism::Match m = *best;
-          m.length += 1;  // 边跨越被删字符
-          matches.push_back(m);
-        }
+        add_correction_edge(key, (std::max)(size_t(2), i + 1), 1,
+                            deletion_credibility_);
       }
     }
-    // 邻键替换容错（用户打错了旁边的键）：第 i 位（i∈{0,1}）换成物理邻键
-    // 后做前缀搜索，取最长匹配（须覆盖被替换位：length >= i+1）。
-    // 邻键展开每位置 2~6 个变体，只允许在退化顶点触发（门控），否则
-    // 正确输入的每个音节都会派生替换边，候选爆炸。
-    if (enable_substitution_ && typo_edges_enabled_ && gated_edges_allowed) {
+    if (enable_substitution_) {
+      // 打错键：第 i 位换成物理邻键。邻键表按小写索引，非字母键跳过。
       for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
         if (current_input[i] < 'a' || current_input[i] > 'z' ||
             delimiters_.find(current_input[i]) != string::npos)
-          continue;  // alphabet 含大写；邻键表按小写索引，越界即踩内存
-        const char* nbrs =
-            substitution_horizontal_only_
-                ? kQwertyNeighborsHorizontal[current_input[i] - 'a']
-                : kQwertyNeighbors[current_input[i] - 'a'];
+          continue;
+        const char* nbrs = kQwertyNeighbors[current_input[i] - 'a'];
         for (const char* p = nbrs; *p; ++p) {
           string key(current_input);
           key[i] = *p;
-          vector<Prism::Match> tmatches;
-          prism.CommonPrefixSearch(key, &tmatches);
-          const Prism::Match* best = nullptr;
-          for (const auto& m : tmatches) {
-            if (m.length < 2 || m.length < i + 1)
-              continue;
-            if (!best || m.length > best->length)
-              best = &m;
-          }
-          if (best) {
-            substituted_match_values.insert(best->value);
-            matches.push_back(*best);
-          }
+          add_correction_edge(key, (std::max)(size_t(2), i + 1), 0,
+                              substitution_credibility_);
         }
       }
     }
-    // 漏打容错（用户少打了一个字母）：第 i 位（i∈{0,1}）插入任一字母后做
-    // 前缀搜索，取最长匹配（须覆盖插入点：length >= i+2）。插入字符是
-    // 虚拟的，push length-1 使边少消耗一个原字符。仅退化顶点触发。
-    if (enable_insertion_ && typo_edges_enabled_ && gated_edges_allowed) {
+    if (enable_insertion_) {
+      // 漏打一个字母：第 i 位插入任一字母后搜索，插入字符不消耗原输入（-1）。
       for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
         if (delimiters_.find(current_input[i]) != string::npos)
           continue;
         for (char c = 'a'; c <= 'z'; ++c) {
           string key(current_input);
           key.insert(i, 1, c);
-          vector<Prism::Match> tmatches;
-          prism.CommonPrefixSearch(key, &tmatches);
-          const Prism::Match* best = nullptr;
-          for (const auto& m : tmatches) {
-            // 匹配须覆盖插入位（length >= i+1）：i=1 时 "wo" 这种 2 字
-            // 音节也要能救（wde→wo+de，漏打最常见的形态）。单字符匹配
-            // 在减 1 后长度为 0，下面 continue 掉，不会产垃圾边。
-            if (m.length < i + 1)
-              continue;
-            if (!best || m.length > best->length)
-              best = &m;
-          }
-          if (best) {
-            inserted_match_values.insert(best->value);
-            Prism::Match m = *best;
-            m.length -= 1;  // 插入字符不消耗原输入
-            if (m.length == 0)
-              continue;
-            matches.push_back(m);
-          }
+          add_correction_edge(key, i + 1, -1, insertion_credibility_);
         }
       }
     }
@@ -397,20 +322,13 @@ int Syllabifier::BuildSyllableGraph(const string& input,
             props.end_pos = end_pos;
             // add a syllable with properties to the edge's
             // spelling-to-syllable map
-            if (correction_enabled &&
-                exact_match_syllables.find(m.value) ==
-                    exact_match_syllables.end()) {
+            if (correction_enabled && exact_match_syllables.find(m.value) ==
+                                          exact_match_syllables.end()) {
               props.is_correction = true;
-              props.credibility =
-                  transposed_match_values.count(m.value)
-                      ? transpose_credibility_
-                  : deleted_match_values.count(m.value)
-                      ? deletion_credibility_
-                  : substituted_match_values.count(m.value)
-                      ? substitution_credibility_
-                  : inserted_match_values.count(m.value)
-                      ? insertion_credibility_
-                      : kCorrectionCredibility;
+              auto credit = correction_values.find(m.value);
+              props.credibility = credit != correction_values.end()
+                                      ? credit->second
+                                      : kCorrectionCredibility;
             }
             auto it = spellings.find(syllable_id);
             if (it == spellings.end()) {

@@ -155,11 +155,13 @@ an<DictEntry> DictEntryIterator::Peek() {
     // get next entry from current chunk
     const auto& chunk = query_result_->chunks[chunk_index_];
     const auto& e = chunk.entries[chunk.cursor];
-    DLOG(INFO) << "creating temporary dict entry '"
-               << chunk.table->GetEntryText(e) << "'.";
     entry_ = New<DictEntry>();
     entry_->code = chunk.code;
-    entry_->text = chunk.table->GetEntryText(e);
+    // pgomgr 2026-10-31：原链 = GetEntryText → GetString → Agent + string(ptr,len)
+    // 每候选 2 次 string 堆分配；string_view 版零拷贝直读 trie，仅在最终持有
+    // 文本时 assign 一次（省掉中间临时 string 的构造+移动析构）。
+    auto text_view = chunk.table->GetEntryTextView(e);
+    entry_->text.assign(text_view.data(), text_view.size());
     const double kS = 18.420680743952367;  // log(1e8)
     entry_->weight = e.weight - kS + chunk.credibility;
     entry_->quality_len = chunk.quality_len;

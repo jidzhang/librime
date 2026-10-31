@@ -633,4 +633,8 @@ string Table::GetEntryText(const table::Entry& entry) {
   return GetString(entry.text);
 }
 
+std::string_view Table::GetEntryTextView(const table::Entry& entry) {
+  return string_table_->GetStringView(entry.text.str_id());
+}
+
 }  // namespace rime

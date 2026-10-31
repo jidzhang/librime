@@ -62,6 +62,20 @@ string StringTable::GetString(StringId string_id) {
   return string(agent.key().ptr(), agent.key().length());
 }
 
+std::string_view StringTable::GetStringView(StringId string_id) {
+  // 复用成员 Agent：其 key() 结果指向 Agent 内部存储，Agent 存活期间有效。
+  // 非线程安全——Table 本身就在引擎线程内使用。
+  lookup_agent_.clear();
+  lookup_agent_.set_query(string_id);
+  try {
+    trie_.reverse_lookup(lookup_agent_);
+  } catch (const marisa::Exception& /*ex*/) {
+    LOG(ERROR) << "invalid id for string table: " << string_id;
+    return {};
+  }
+  return {lookup_agent_.key().ptr(), lookup_agent_.key().length()};
+}
+
 size_t StringTable::NumKeys() const {
   return trie_.size();
 }

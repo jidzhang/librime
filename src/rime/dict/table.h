@@ -200,6 +200,7 @@ class Table : public MappedFile {
                       size_t start_pos,
                       TableQueryResult* result);
   RIME_DLL string GetEntryText(const table::Entry& entry);
+  RIME_DLL std::string_view GetEntryTextView(const table::Entry& entry);
 
   uint32_t dict_file_checksum() const;
   table::Metadata* metadata() const { return metadata_; }

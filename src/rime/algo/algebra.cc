@@ -23,6 +23,8 @@ void Script::Merge(const string& s,
                    const SpellingProperties& sp,
                    const vector<Spelling>& v) {
   vector<Spelling>& m((*this)[s]);
+  // pgomgr: _Emplace_reallocate 8589 万次（0.8% CPU）——预分配消除 vector 拷贝
+  m.reserve(m.size() + v.size());
   for (const Spelling& x : v) {
     Spelling y(x);
     // 疊加運算結果

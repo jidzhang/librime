@@ -25,3 +25,5 @@ build-x86/
 pgo-profile/
 x86/
 Thumbs.db
+build-plain/
+build-x86-plain/

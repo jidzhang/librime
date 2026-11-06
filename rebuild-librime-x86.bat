@@ -1,11 +1,11 @@
 @echo off
-rem PGO stage 1: build instrumented rime.dll (/LTCG:PGINSTRUMENT).
-rem After build, copy build\bin\Release\rime.dll (+ .pgd) to eval-workspace,
-rem run the training workload there, then run rebuild-librime-pgo2.bat.
+rem Build x86 (Win32) rime.dll against the x86 deps in librime\x86\.
+rem Output: build-x86\bin\Release\rime.dll. ASCII only.
 call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
 cd /d "%~dp0"
 call env.bat
-cmake . -B build -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
+set ARCH=Win32
+cmake . -B build-x86 -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
   -DCMAKE_CONFIGURATION_TYPES:STRING="Release"^
   -DCMAKE_BUILD_TYPE:STRING="Release"^
   -DCMAKE_USER_MAKE_RULES_OVERRIDE:PATH="%RIME_ROOT%\cmake\c_flag_overrides.cmake"^
@@ -16,7 +16,6 @@ cmake . -B build -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
   -DBUILD_SHARED_LIBS=ON^
   -DBUILD_TEST=OFF^
   -DENABLE_LOGGING=ON^
-  -DCMAKE_PREFIX_PATH:PATH="%RIME_ROOT%\deps\usr"^
-  -DCMAKE_SHARED_LINKER_FLAGS_RELEASE:STRING="/LTCG:PGINSTRUMENT /DEBUG /OPT:REF /OPT:ICF" > %~dp0..\librime-reconfigure.log 2>&1
-cmake --build build --config Release --target rime > %~dp0..\librime-build-pgo1.log 2>&1
+  -DCMAKE_PREFIX_PATH:PATH="%RIME_ROOT%\x86" > %~dp0..\librime-x86-configure.log 2>&1
+cmake --build build-x86 --config Release --target rime > %~dp0..\librime-x86-build.log 2>&1
 exit /b %ERRORLEVEL%

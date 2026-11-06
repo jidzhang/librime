@@ -19,3 +19,9 @@ node_modules/
 
 # 本机构建中间产物（573MB，不入库）
 build-tools/
+
+# 本机 PGO/构建产物与依赖树（不入库；脚本可重建）
+build-x86/
+pgo-profile/
+x86/
+Thumbs.db

@@ -129,7 +129,10 @@ bool TextDb::OpenReadOnly() {
   if (loaded_) {
     readonly_ = true;
   } else {
-    LOG(ERROR) << "Error opening db '" << name_ << "' read-only.";
+    // 可选数据文件（essay 词频表等）缺失是正常场景，不是错误——
+    // LOG(ERROR) 会触发 glog 创建 INFO/WARNING/ERROR 三个文件，
+    // 降为 WARNING 让默认 minloglevel=2 时不产生任何文件。
+    LOG(WARNING) << "Optional db '" << name_ << "' not found (skipped).";
   }
   modified_ = false;
   return loaded_;

@@ -61,6 +61,12 @@ class ScriptTranslator : public Translator,
   // 换位容错（translator/enable_transpose，默认 false）：音节图加相邻字符
   // 互换的纠错边（credibility 惩罚），使 diam/diama 类换位错字仍可达原词。
   bool enable_transpose() const { return enable_transpose_; }
+  // 纠错边扫描窗口（translator/correction_scan_window，默认 2）：
+  // 四类纠错边（换位/多打/错键/漏打）在每个音节边界顶点探测"剩余输入"
+  // 的前 N 个字母位置。2=只罩下一音节声母区（历史行为，韵母区盲区，
+  // bug#26）；4/5 可覆盖韵母起始区。候选边数随窗口线性增长，改默认
+  // 前必须过守卫门（见 58-计划）。
+  int correction_scan_window() const { return correction_scan_window_; }
   // 换位纠错边的 credibility 惩罚（translator/transpose_credibility，
   // 默认 log(0.01)≈-4.6；更负 = 换位候选更难胜过正常解析，用于守卫调参）。
   double transpose_credibility() const { return transpose_credibility_; }
@@ -101,6 +107,7 @@ class ScriptTranslator : public Translator,
   bool abbrev_sentences_ = false;
   double sentence_quality_boost_ = 0.;
   bool enable_transpose_ = false;
+  int correction_scan_window_ = 2;
   double transpose_credibility_ = -4.605170185988091;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;

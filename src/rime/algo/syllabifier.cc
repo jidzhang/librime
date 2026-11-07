@@ -246,7 +246,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     };
     if (enable_transpose_) {
       // 换位：相邻两字符互换，匹配须覆盖被换的两字符（>= i+2）。
-      for (size_t i = 0; i + 1 < current_input.size() && i < 2; ++i) {
+      for (size_t i = 0; i + 1 < current_input.size() && i < static_cast<size_t>(correction_scan_window_); ++i) {
         if (current_input[i] == current_input[i + 1] ||
             delimiters_.find(current_input[i]) != string::npos ||
             delimiters_.find(current_input[i + 1]) != string::npos)
@@ -259,7 +259,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     if (enable_deletion_) {
       // 多打一个键：删去第 i 位后搜索，边多消费一个原字符（+1）。
       // 匹配须 >=2 且越过删除点，否则单字母音节会产出垃圾边（实测 +89%）。
-      for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
+      for (size_t i = 0; i < current_input.size() && i < static_cast<size_t>(correction_scan_window_); ++i) {
         if (delimiters_.find(current_input[i]) != string::npos)
           continue;
         string key(current_input);
@@ -270,7 +270,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     }
     if (enable_substitution_) {
       // 打错键：第 i 位换成物理邻键。邻键表按小写索引，非字母键跳过。
-      for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
+      for (size_t i = 0; i < current_input.size() && i < static_cast<size_t>(correction_scan_window_); ++i) {
         if (current_input[i] < 'a' || current_input[i] > 'z' ||
             delimiters_.find(current_input[i]) != string::npos)
           continue;
@@ -285,7 +285,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     }
     if (enable_insertion_) {
       // 漏打一个字母：第 i 位插入任一字母后搜索，插入字符不消耗原输入（-1）。
-      for (size_t i = 0; i < current_input.size() && i < 2; ++i) {
+      for (size_t i = 0; i < current_input.size() && i < static_cast<size_t>(correction_scan_window_); ++i) {
         if (delimiters_.find(current_input[i]) != string::npos)
           continue;
         for (char c = 'a'; c <= 'z'; ++c) {

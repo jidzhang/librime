@@ -92,6 +92,7 @@ class ScriptSyllabifier : public PhraseSyllabifier {
     if (corrector) {
       syllabifier_.EnableCorrection(corrector);
     }
+    syllabifier_.SetCorrectionScanWindow(translator->correction_scan_window());
     if (translator->enable_transpose()) {
       syllabifier_.EnableTranspose(translator->transpose_credibility());
     }
@@ -314,6 +315,10 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
                     &always_show_comments_);
     config->GetBool(name_space_ + "/enable_correction", &enable_correction_);
     config->GetBool(name_space_ + "/enable_transpose", &enable_transpose_);
+    config->GetInt(name_space_ + "/correction_scan_window",
+                   &correction_scan_window_);
+    if (correction_scan_window_ < 1) correction_scan_window_ = 1;
+    if (correction_scan_window_ > 8) correction_scan_window_ = 8;
     config->GetDouble(name_space_ + "/transpose_credibility",
                       &transpose_credibility_);
     config->GetBool(name_space_ + "/enable_deletion", &enable_deletion_);

@@ -61,6 +61,12 @@ class Syllabifier {
                                   Prism& prism,
                                   SyllableGraph* graph);
   RIME_DLL void EnableCorrection(Corrector* corrector);
+  // 纠错边扫描窗口（translator/correction_scan_window，默认 2）：四类纠错边
+  // 在每个顶点探测剩余输入前 N 个字母位置。2=历史行为（只罩下一音节声母
+  // 区，韵母区盲区见 bug#26）；4/5 覆盖韵母起始区。候选边数随窗口线性增长。
+  RIME_DLL void SetCorrectionScanWindow(int window) {
+    correction_scan_window_ = window < 1 ? 1 : window;
+  }
   // 换位容错（translator/enable_transpose）：对每个顶点的剩余输入做相邻字符
   // 互换变体的前缀搜索，命中边按纠错边处理（is_correction + credibility
   // 惩罚）。
@@ -108,6 +114,7 @@ class Syllabifier {
   bool strict_spelling_ = false;
   Projection* canonicalizer_ = nullptr;
   bool enable_transpose_ = false;
+  int correction_scan_window_ = 2;
   double transpose_credibility_ = -4.605170185988091;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;

@@ -93,6 +93,10 @@ class ScriptSyllabifier : public PhraseSyllabifier {
       syllabifier_.EnableCorrection(corrector);
     }
     syllabifier_.SetCorrectionScanWindow(translator->correction_scan_window());
+    if (translator->enable_word_initial_deletion()) {
+      syllabifier_.EnableWordInitialDeletion(
+          translator->deletion_credibility());
+    }
     if (translator->enable_transpose()) {
       syllabifier_.EnableTranspose(translator->transpose_credibility());
     }
@@ -319,6 +323,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
                    &correction_scan_window_);
     if (correction_scan_window_ < 1) correction_scan_window_ = 1;
     if (correction_scan_window_ > 8) correction_scan_window_ = 8;
+    config->GetBool(name_space_ + "/enable_word_initial_deletion",
+                    &enable_word_initial_deletion_);
     config->GetDouble(name_space_ + "/transpose_credibility",
                       &transpose_credibility_);
     config->GetBool(name_space_ + "/enable_deletion", &enable_deletion_);

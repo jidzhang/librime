@@ -67,6 +67,13 @@ class ScriptTranslator : public Translator,
   // bug#26）；4/5 可覆盖韵母起始区。候选边数随窗口线性增长，改默认
   // 前必须过守卫门（见 58-计划）。
   int correction_scan_window() const { return correction_scan_window_; }
+  // 词首多打删除（translator/enable_word_initial_deletion，默认 false）：
+  // 首遍放行"仅输入首字母位置的删除边"——hshangxian（shang 前多打 h）
+  // 类错字在二遍修不到（二遍只出词不出句、-8 罚分难进前 9）。限定词首
+  // 单边：每查询仅 1 条边，不复发 10-29 全位置删除的垃圾边泛滥（+89%）。
+  bool enable_word_initial_deletion() const {
+    return enable_word_initial_deletion_;
+  }
   // 换位纠错边的 credibility 惩罚（translator/transpose_credibility，
   // 默认 log(0.01)≈-4.6；更负 = 换位候选更难胜过正常解析，用于守卫调参）。
   double transpose_credibility() const { return transpose_credibility_; }
@@ -108,6 +115,7 @@ class ScriptTranslator : public Translator,
   double sentence_quality_boost_ = 0.;
   bool enable_transpose_ = false;
   int correction_scan_window_ = 2;
+  bool enable_word_initial_deletion_ = false;
   double transpose_credibility_ = -4.605170185988091;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;

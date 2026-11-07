@@ -61,6 +61,15 @@ class Syllabifier {
                                   Prism& prism,
                                   SyllableGraph* graph);
   RIME_DLL void EnableCorrection(Corrector* corrector);
+  // 词首多打删除（translator/enable_word_initial_deletion）：首遍限定
+  // "输入首位置的删除边"——hshangxian（shang 前多打 h）类错字在二遍
+  // 修不到。仅词首单边，且只在输入**不是**合法全拼前缀时触发（合法
+  // 全拼不怀疑首字母，否则整句全拼 d5 被假路径拉低实测 -4.4）。
+  RIME_DLL void EnableWordInitialDeletion(double credibility =
+                                              -4.605170185988091) {
+    enable_word_initial_deletion_ = true;
+    word_initial_deletion_credibility_ = credibility;
+  }
   // 纠错边扫描窗口（translator/correction_scan_window，默认 2）：四类纠错边
   // 在每个顶点探测剩余输入前 N 个字母位置。2=历史行为（只罩下一音节声母
   // 区，韵母区盲区见 bug#26）；4/5 覆盖韵母起始区。候选边数随窗口线性增长。
@@ -116,6 +125,10 @@ class Syllabifier {
   bool enable_transpose_ = false;
   int correction_scan_window_ = 2;
   double transpose_credibility_ = -4.605170185988091;
+  bool enable_word_initial_deletion_ = false;
+  double word_initial_deletion_credibility_ = -4.605170185988091;
+  bool wid_normal_prefix_checked_ = false;
+  bool wid_input_is_normal_prefix_ = false;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;
   bool enable_substitution_ = false;

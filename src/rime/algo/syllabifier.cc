@@ -295,6 +295,24 @@ int Syllabifier::BuildSyllableGraph(const string& input,
         }
       }
     }
+    if (enable_word_initial_deletion_ && begin_pos == 0) {
+      // 整串是否合法全拼前缀只算一次（合法=用户在正常打全拼，不怀疑
+      // 首字母；整句实测该边在合法全拼上拉低 d5 达 -4.4，2026-11-07）。
+      if (!wid_normal_prefix_checked_) {
+        wid_input_is_normal_prefix_ = IsNormalPinyinPrefix(input, prism);
+        wid_normal_prefix_checked_ = true;
+      }
+      if (!wid_input_is_normal_prefix_ && current_input.size() >= 2 &&
+          current_input[0] != current_input[1] &&
+          delimiters_.find(current_input[0]) == string::npos) {
+        // 词首多打删除（首遍也生效）：hshangxian（shang 前多打 h）类错字，
+        // 删去输入第一个字母后搜索，边多消费一个原字符（+1）。仅此一条边
+        // （begin_pos==0 限定），不复发 10-29 全位置删除的垃圾边泛滥。
+        string key(current_input);
+        key.erase(0, 1);
+        add_correction_edge(key, 2, 1, word_initial_deletion_credibility_);
+      }
+    }
 
     size_t leading_gap = begin_pos - current_pos;
     if (!matches.empty()) {

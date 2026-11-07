@@ -1,7 +1,7 @@
 @echo off
 rem Build x86 (Win32) rime.dll against the x86 deps in librime\x86\.
 rem Output: build-x86\bin\Release\rime.dll. ASCII only.
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+call "%~dp0vcvars-detect.bat"
 cd /d "%~dp0"
 call env.bat
 set ARCH=Win32

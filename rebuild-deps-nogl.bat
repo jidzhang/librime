@@ -4,7 +4,7 @@ rem for the GL negative-optimization verification). Same as rebuild-deps-gl.bat
 rem but: no forced /GL, and NO cxx_flag_overrides (which carry /GL in
 rem RELEASE_INIT) - CRT/O2/utf-8 set explicitly instead.
 rem ASCII only. 2026-10-31.
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+call "%~dp0vcvars-detect.bat"
 cd /d "%~dp0"
 call env.bat
 set RR=%RIME_ROOT%

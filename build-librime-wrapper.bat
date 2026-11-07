@@ -1,4 +1,4 @@
 @echo off
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+call "%~dp0vcvars-detect.bat"
 cd /d "%~dp0"
 call build.bat librime

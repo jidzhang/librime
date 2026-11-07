@@ -3,7 +3,7 @@ rem Rebuild static deps with forced /GL so the final rime.dll link can do
 rem whole-program optimization across librime + leveldb/marisa/glog/yaml/opencc.
 rem Mirrors build.bat "deps" flags, plus forced CMAKE_(C|CXX)_FLAGS /GL.
 rem ASCII only. 2026-10-31.
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+call "%~dp0vcvars-detect.bat"
 cd /d "%~dp0"
 call env.bat
 set RR=%RIME_ROOT%

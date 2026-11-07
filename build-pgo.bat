@@ -78,7 +78,7 @@ if %SKIP_TRAIN%==1 (
   if not exist "%PROFILE%\x86\rime.pgd" (set FAILMSG=no x86 profiles in %PROFILE%\x86; run without --skip-train first & goto :fail)
 )
 
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+call "%~dp0vcvars-detect.bat"
 if errorlevel 1 (set FAILMSG=vcvars64 failed & goto :fail)
 set PGORT64=%VCToolsInstallDir%bin\Hostx64\x64\pgort140.dll
 set PGORT32=%VCToolsInstallDir%bin\Hostx86\x86\pgort140.dll

@@ -2,7 +2,7 @@
 rem Build x86 (Win32) static deps into librime\x86\ — separate prefix and
 rem build dirs so the x64 artifacts in lib\ are untouched. boost stays
 rem header-only (install-boost.bat only runs b2 headers). ASCII only.
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+call "%~dp0vcvars-detect.bat"
 cd /d "%~dp0"
 call env.bat
 set ARCH=Win32

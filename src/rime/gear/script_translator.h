@@ -65,7 +65,7 @@ class ScriptTranslator : public Translator,
   // 四类纠错边（换位/多打/错键/漏打）在每个音节边界顶点探测"剩余输入"
   // 的前 N 个字母位置。2=只罩下一音节声母区（历史行为，韵母区盲区，
   // bug#26）；4/5 可覆盖韵母起始区。候选边数随窗口线性增长，改默认
-  // 前必须过守卫门（见 58-计划）。
+  // 前必须过守卫门（d1/d3/d5 零回归）。
   int correction_scan_window() const { return correction_scan_window_; }
   // 词首多打删除（translator/enable_word_initial_deletion，默认 false）：
   // 首遍放行"仅输入首字母位置的删除边"——hshangxian（shang 前多打 h）

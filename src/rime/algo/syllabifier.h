@@ -70,6 +70,27 @@ class Syllabifier {
     enable_word_initial_deletion_ = true;
     word_initial_deletion_credibility_ = credibility;
   }
+  // 非法全拼前缀的首遍纠错边：当输入串不能被完整全拼解释时，
+  // 在首遍也放行 del/sub/ins——用户确实在打错字，首遍候选本来就是垃圾，
+  // "主列表零污染"的保护此时无意义，应让纠错候选同池竞争。
+  RIME_DLL void EnableDegenerateFirstPass(
+      bool enable_del, double del_cred,
+      bool enable_sub, double sub_cred,
+      bool enable_ins, double ins_cred) {
+    degenerate_first_pass_ = true;
+    if (enable_del) {
+      degenerate_del_cred_ = del_cred;
+      has_degenerate_del_ = true;
+    }
+    if (enable_sub) {
+      degenerate_sub_cred_ = sub_cred;
+      has_degenerate_sub_ = true;
+    }
+    if (enable_ins) {
+      degenerate_ins_cred_ = ins_cred;
+      has_degenerate_ins_ = true;
+    }
+  }
   // 纠错边扫描窗口（translator/correction_scan_window，默认 2）：四类纠错边
   // 在每个顶点探测剩余输入前 N 个字母位置。2=历史行为（只罩下一音节声母
   // 区，韵母区盲区见 bug#26）；4/5 覆盖韵母起始区。候选边数随窗口线性增长。
@@ -129,6 +150,15 @@ class Syllabifier {
   double word_initial_deletion_credibility_ = -4.605170185988091;
   bool wid_normal_prefix_checked_ = false;
   bool wid_input_is_normal_prefix_ = false;
+  bool degenerate_first_pass_ = false;
+  bool has_degenerate_del_ = false;
+  double degenerate_del_cred_ = -4.605170185988091;
+  bool has_degenerate_sub_ = false;
+  double degenerate_sub_cred_ = -4.605170185988091;
+  bool has_degenerate_ins_ = false;
+  double degenerate_ins_cred_ = -4.605170185988091;
+  bool dfp_normal_prefix_checked_ = false;
+  bool dfp_input_is_normal_prefix_ = false;
   bool enable_deletion_ = false;
   double deletion_credibility_ = -4.605170185988091;
   bool enable_substitution_ = false;

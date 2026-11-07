@@ -297,7 +297,7 @@ int Syllabifier::BuildSyllableGraph(const string& input,
     }
     if (enable_word_initial_deletion_ && begin_pos == 0) {
       // 整串是否合法全拼前缀只算一次（合法=用户在正常打全拼，不怀疑
-      // 首字母；整句实测该边在合法全拼上拉低 d5 达 -4.4，2026-11-07）。
+      // 首字母；放行该边在合法全拼上会拉低整句准确率）。
       if (!wid_normal_prefix_checked_) {
         wid_input_is_normal_prefix_ = IsNormalPinyinPrefix(input, prism);
         wid_normal_prefix_checked_ = true;
@@ -311,6 +311,56 @@ int Syllabifier::BuildSyllableGraph(const string& input,
         string key(current_input);
         key.erase(0, 1);
         add_correction_edge(key, 2, 1, word_initial_deletion_credibility_);
+      }
+    }
+    // 非法全拼前缀的首遍纠错边：当输入串不能被完整全拼解释且确有
+    // 结构断裂（vertex 级别有输入但匹配不到任何合法拼写）时，首遍也
+    // 放行 del/sub/ins——用户确实在打错字，"零污染"保护无意义。
+    // 混合连打的简拼尾部不是断裂（是"还在打字中"），不触发。
+    if (degenerate_first_pass_) {
+      if (!dfp_normal_prefix_checked_) {
+        dfp_input_is_normal_prefix_ = IsNormalPinyinPrefix(input, prism);
+        dfp_normal_prefix_checked_ = true;
+      }
+      if (!dfp_input_is_normal_prefix_ && found_degenerate_vertex_) {
+        // 首遍放行：与二遍的 enable_deletion/substitution/insertion 逻辑
+        // 相同，只是发生在首遍（correction_values 先到先得不会覆盖已有的
+        // 换位边惩罚——换位优先级更高，这是设计意图）。
+        if (has_degenerate_del_ && !enable_deletion_) {
+          for (size_t i = 0; i < current_input.size() && i < static_cast<size_t>(correction_scan_window_); ++i) {
+            if (delimiters_.find(current_input[i]) != string::npos)
+              continue;
+            string key(current_input);
+            key.erase(i, 1);
+            add_correction_edge(key, (std::max)(size_t(2), i + 1), 1,
+                                degenerate_del_cred_);
+          }
+        }
+        if (has_degenerate_sub_ && !enable_substitution_) {
+          for (size_t i = 0; i < current_input.size() && i < static_cast<size_t>(correction_scan_window_); ++i) {
+            if (current_input[i] < 'a' || current_input[i] > 'z' ||
+                delimiters_.find(current_input[i]) != string::npos)
+              continue;
+            const char* nbrs = kQwertyNeighbors[current_input[i] - 'a'];
+            for (const char* p = nbrs; *p; ++p) {
+              string key(current_input);
+              key[i] = *p;
+              add_correction_edge(key, (std::max)(size_t(2), i + 1), 0,
+                                  degenerate_sub_cred_);
+            }
+          }
+        }
+        if (has_degenerate_ins_ && !enable_insertion_) {
+          for (size_t i = 0; i < current_input.size() && i < static_cast<size_t>(correction_scan_window_); ++i) {
+            if (delimiters_.find(current_input[i]) != string::npos)
+              continue;
+            for (char c = 'a'; c <= 'z'; ++c) {
+              string key(current_input);
+              key.insert(i, 1, c);
+              add_correction_edge(key, i + 1, -1, degenerate_ins_cred_);
+            }
+          }
+        }
       }
     }
 

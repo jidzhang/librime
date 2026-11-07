@@ -101,6 +101,8 @@ class ScriptSyllabifier : public PhraseSyllabifier {
       syllabifier_.EnableTranspose(translator->transpose_credibility());
     }
     // 二遍拼接：del/sub/ins 三边只在二遍开，首遍保持纯净（主列表零污染）。
+    // 例外：输入串不是合法全拼前缀且确有结构断裂时，首遍也放行
+    // del/sub/ins——用户确实在打错字，"零污染"保护无意义。
     if (second_pass || !translator->typo_second_pass()) {
       if (translator->enable_deletion()) {
         syllabifier_.EnableDeletion(translator->deletion_credibility());
@@ -113,6 +115,11 @@ class ScriptSyllabifier : public PhraseSyllabifier {
       }
     } else {
       syllabifier_.EnableDegenerateTracking();  // 首遍记录二遍触发信号
+      // 非法全拼前缀：首遍也开 del/sub/ins（同池竞争）。
+      syllabifier_.EnableDegenerateFirstPass(
+          translator->enable_deletion(), translator->deletion_credibility(),
+          translator->enable_substitution(), translator->substitution_credibility(),
+          translator->enable_insertion(), translator->insertion_credibility());
     }
   }
   void ClearGraph() {

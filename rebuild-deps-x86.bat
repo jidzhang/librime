@@ -1,5 +1,5 @@
 @echo off
-rem Build x86 (Win32) static deps into librime\x86\ — separate prefix and
+rem Build x86 (Win32) static deps into librime\x86\ ? separate prefix and
 rem build dirs so the x64 artifacts in lib\ are untouched. boost stays
 rem header-only (install-boost.bat only runs b2 headers). ASCII only.
 call "%~dp0vcvars-detect.bat"

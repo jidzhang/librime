@@ -3,7 +3,7 @@ rem Build x86 (Win32) rime.dll against the x86 deps in librime\x86\.
 rem Output: build-x86\bin\Release\rime.dll. ASCII only.
 call "%~dp0vcvars-detect.bat"
 cd /d "%~dp0"
-call env.bat
+call "%~dp0env.bat"
 set ARCH=Win32
 cmake . -B build-x86 -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
   -DCMAKE_CONFIGURATION_TYPES:STRING="Release"^

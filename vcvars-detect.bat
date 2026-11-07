@@ -12,8 +12,14 @@ if not exist "%VSWHERE%" (
   echo [vcvars-detect] vswhere.exe not found - install Visual Studio 2019+ 1>&2
   endlocal & set VCVARS64_BAT= & exit /b 1
 )
+rem vswhere output goes through a temp file: its own path contains
+rem "Program Files (x86)" whose parens break the for /f in (...) clause
+rem when inlined as a backquoted command ('vswhere.exe' not recognized).
+set "VSWOUT=%TEMP%\moqi-vcvars-detect-%RANDOM%.txt"
+"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > "%VSWOUT%" 2>nul
 set "VS_PATH="
-for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
+for /f "usebackq delims=" %%i in ("%VSWOUT%") do set "VS_PATH=%%i"
+del "%VSWOUT%" >nul 2>&1
 if not defined VS_PATH (
   echo [vcvars-detect] no VS with C++ tools found via vswhere 1>&2
   endlocal & set VCVARS64_BAT= & exit /b 1
@@ -23,7 +29,7 @@ if not exist "%VCVARS%" (
   echo [vcvars-detect] vcvars64.bat missing under %VS_PATH% 1>&2
   endlocal & set VCVARS64_BAT= & exit /b 1
 )
-endlocal & set "VCVARS64_BAT=%VCVARS%"
+endlocal & set VCVARS64_BAT=%VCVARS%
 call "%VCVARS64_BAT%" >nul
 if errorlevel 1 (
   echo [vcvars-detect] vcvars64 invocation failed 1>&2

@@ -1,7 +1,7 @@
 @echo off
 call "%~dp0vcvars-detect.bat"
 cd /d "%~dp0"
-call env.bat
+call "%~dp0env.bat"
 cmake . -B build -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
   -DCMAKE_CONFIGURATION_TYPES:STRING="Release"^
   -DCMAKE_BUILD_TYPE:STRING="Release"^

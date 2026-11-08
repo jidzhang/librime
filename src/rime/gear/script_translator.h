@@ -106,6 +106,18 @@ class ScriptTranslator : public Translator,
   bool typo_second_pass_skip_normal_prefix() const {
     return typo_second_pass_skip_normal_prefix_;
   }
+  // 竞争晋升（translator/typo_second_pass_compete_floor，默认 -1 = 关）：
+  // 二遍最优纠错候选晋升到候选列表首位，其余二遍候选仍走交错拼接。
+  // 语义实测修正（62 §二十二）：脚本翻译器的候选 quality 在 Peek 时机
+  // 尚未赋值（首遍头部恒 0），"赢过首遍第一名裕度"的比较退化为本旋钮
+  // 对纠错候选自身 quality 的绝对下限——分布 1.2~2.2，floor=2 即只放行
+  // 顶层质量档的纠错词。全量同池归并（compete v1）不可行：Candidate::
+  // compare 跨度/长度优先于 quality，重切分纠错候选无视罚分压页首。
+  // 正常输入二遍不触发（skip 门），晋升零扰动——守卫 d1/d4/d5 逐位
+  // 复现实证；错字维度 top1 大涨、d3 主线 −0.4（取舍见 62 §二十二）。
+  double typo_second_pass_compete_floor() const {
+    return typo_second_pass_compete_floor_;
+  }
   int max_word_length() const { return max_word_length_; }
   int core_word_length() const;
   Projection* canonicalizer() const { return canonicalizer_.get(); }
@@ -127,6 +139,7 @@ class ScriptTranslator : public Translator,
   int typo_second_pass_max_input_length_ = 12;
   int typo_second_pass_insert_after_ = 5;
   bool typo_second_pass_skip_normal_prefix_ = true;
+  double typo_second_pass_compete_floor_ = -1;
   int max_homophones_ = 1;
   int spelling_hints_ = 0;
   int max_word_length_ = 0;

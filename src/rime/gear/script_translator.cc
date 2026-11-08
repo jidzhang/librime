@@ -351,6 +351,8 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
                    &typo_second_pass_insert_after_);
     config->GetBool(name_space_ + "/typo_second_pass_skip_normal_prefix",
                     &typo_second_pass_skip_normal_prefix_);
+    config->GetDouble(name_space_ + "/typo_second_pass_compete_floor",
+                      &typo_second_pass_compete_floor_);
     if (!config->GetBool(name_space_ + "/enable_word_completion",
                          &enable_word_completion_)) {
       enable_word_completion_ = enable_completion_;
@@ -420,8 +422,27 @@ an<Translation> ScriptTranslator::Query(const string& input,
           /*second_pass=*/true);
       if (second->Evaluate(dict_.get(),
                            enable_user_dict ? user_dict_.get() : NULL)) {
-        result = New<InterleaveTranslation>(
+        an<Translation> tail = New<InterleaveTranslation>(
             primary, second, (size_t)typo_second_pass_insert_after_);
+        // 竞争晋升（见 script_translator.h 注释）：只比两个头部的 quality，
+        // 赢过裕度才动 #1；重切分跨度不参与比较（v1 的失败机理）。
+        if (typo_second_pass_compete_floor_ >= 0) {
+          auto best = second->Peek();
+          auto front = primary->Peek();
+
+          if (best && front &&
+              best->quality() - front->quality() >
+                  typo_second_pass_compete_floor_) {
+            auto promoted = New<UnionTranslation>();
+            *promoted += New<UniqueTranslation>(best);
+            *promoted += tail;
+            result = promoted;
+          } else {
+            result = tail;
+          }
+        } else {
+          result = tail;
+        }
       }
     }
   }

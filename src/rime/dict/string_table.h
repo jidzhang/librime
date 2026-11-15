@@ -52,6 +52,10 @@ class RIME_DLL StringTableBuilder : public StringTable {
   void Add(const string& key,
            double weight = 1.0,
            StringId* reference = nullptr);
+  // Reads key immediately; the view does not need to outlive this call.
+  void AddView(std::string_view key,
+               double weight = 1.0,
+               StringId* reference = nullptr);
   void Clear();
   void Build();
   void Dump(char* ptr, size_t size);

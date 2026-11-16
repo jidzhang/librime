@@ -76,8 +76,11 @@ if %build_deps% == 0 (
 )))
 
 if not defined build_dir set build_dir=build
-if not defined deps_install_prefix set deps_install_prefix=%RIME_ROOT%
-if not defined rime_install_prefix set rime_install_prefix=%RIME_ROOT%\dist
+rem RIME_ROOT is %~dp0 and therefore ends with a backslash; strip it, otherwise
+rem -DCMAKE_INSTALL_PREFIX:PATH="%deps_install_prefix%" escapes the closing
+rem quote and cmake writes a broken cmake_install.cmake.
+if not defined deps_install_prefix set deps_install_prefix=%RIME_ROOT:~0,-1%
+if not defined rime_install_prefix set rime_install_prefix=%RIME_ROOT:~0,-1%\dist
 
 if %clean% == 1 (
  rmdir /s /q %build_dir%

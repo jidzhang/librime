@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -182,6 +183,41 @@ constexpr SeverityFileSpec kSeverityFiles[] = {
     {"FATAL", spdlog::level::critical},
 };
 
+// 日志保留天数；glog EnableLogCleaner 语义（移植自本地加固）。
+constexpr int kLogRetentionDays = 7;
+
+// 删除超过保留期的旧日志文件（只看 rime 日志命名形态，不碰目录里别的文件）。
+void PurgeExpiredLogs(const fs::path& directory,
+                      const std::string& app_name) {
+  std::error_code ec;
+  if (!fs::is_directory(directory, ec))
+    return;
+  for (fs::directory_iterator it(directory, ec), end; !ec && it != end;
+       it.increment(ec)) {
+    const auto& entry = *it;
+    if (!entry.is_regular_file(ec))
+      continue;
+    const auto name = ToUtf8(entry.path().filename());
+    if (name.compare(0, app_name.size(), app_name) != 0)
+      continue;
+    if (name.find(".log") == std::string::npos)
+      continue;
+    auto write_time = fs::last_write_time(entry.path(), ec);
+    if (ec) {
+      ec.clear();
+      continue;
+    }
+    // C++17 file_clock 与 system_clock 的转换。
+    const auto file_now = fs::file_time_type::clock::now();
+    const auto age = std::chrono::duration_cast<std::chrono::hours>(
+        file_now - write_time);
+    if (age > std::chrono::hours(24 * kLogRetentionDays)) {
+      fs::remove(entry.path(), ec);
+      ec.clear();
+    }
+  }
+}
+
 bool EnsureLogDirectory(const fs::path& directory) {
   std::error_code ec;
   fs::create_directories(directory, ec);
@@ -194,30 +230,93 @@ bool EnsureLogDirectory(const fs::path& directory) {
   return true;
 }
 
-LogFileSink CreateFileSink(const fs::path& directory,
-                           const std::string& app_name,
-                           const std::string& date,
-                           const std::string& pid,
-                           const char* severity_name) {
-  LogFileSink result;
-  result.file_name =
-      app_name + "." + date + "." + pid + "." + severity_name + ".log";
-  const auto file_path = directory / ToPath(result.file_name);
-  std::error_code ec;
-  try {
-    result.sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
-        file_path.string(), false);
-    fs::permissions(file_path, fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::replace, ec);
-  } catch (const spdlog::spdlog_ex& ex) {
-    std::fprintf(stderr, "Rime: failed to open log file %s: %s\n",
-                 ToUtf8(file_path).c_str(), ex.what());
-  } catch (const std::exception& ex) {
-    std::fprintf(stderr, "Rime: failed to open log file %s: %s\n",
-                 ToUtf8(file_path).c_str(), ex.what());
+// 懒创建 + 单文件上限的 glog 风格文件 sink。
+// - 首条消息到达才真正打开文件：产品以 min_log_level=ERROR 运行时平时零日志
+//   文件（glog 本为惰性建文件；facade 若急切创建会让每个进程无条件落 4 个空
+//   文件，正是 79592f5c 修过的"平时零日志文件"契约）。
+// - 单文件超过 kMaxLogBytes（4MB）后滚动新序号文件（.1/.2 插在 .log 前），防失控
+//   日志点写出 GB 级单文件（移植自 FLAGS_max_log_size=32）。
+// - 首次打开时补建 0600 权限与 <app>.<LEVEL> symlink（glog 兼容形态）。
+void RefreshSymlink(const fs::path& directory,
+                    const std::string& app_name,
+                    const std::string& severity,
+                    const std::string& file_name);
+
+class LazyFileSink : public spdlog::sinks::base_sink<std::mutex> {
+ public:
+  LazyFileSink(const fs::path& directory, const std::string& app_name,
+               const std::string& date, const std::string& pid,
+               const std::string& severity)
+      : directory_(directory),
+        app_name_(app_name),
+        date_(date),
+        pid_(pid),
+        severity_(severity) {}
+
+ protected:
+  void sink_it_(const spdlog::details::log_msg& msg) override {
+    if (!inner_) {
+      OpenFile(0);
+      if (!inner_)
+        return;  // 打不开文件时静默丢消息；stderr 镜像仍会输出。
+    }
+    if (bytes_written_ >= kMaxLogBytes) {
+      ++sequence_;
+      OpenFile(sequence_);
+      if (!inner_)
+        return;
+    }
+    inner_->log(msg);
+    // 近似记账：payload + 默认全格式行开销；上限判断允许少量偏差。
+    bytes_written_ += msg.payload.size() + kLineOverhead;
   }
-  return result;
-}
+
+  void flush_() override {
+    if (inner_)
+      inner_->flush();
+  }
+
+ private:
+  void OpenFile(int sequence) {
+    std::string suffix;
+    if (sequence > 0) {
+      suffix = "." + std::to_string(sequence);
+    }
+    file_name_ = app_name_ + "." + date_ + "." + pid_ + "." + severity_ +
+                 suffix + ".log";
+    const auto file_path = directory_ / ToPath(file_name_);
+    std::error_code ec;
+    try {
+      inner_ = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
+          file_path.string(), false);
+      fs::permissions(file_path, fs::perms::owner_read | fs::perms::owner_write,
+                      fs::perm_options::replace, ec);
+      bytes_written_ = 0;
+      if (fs::exists(file_path, ec))
+        bytes_written_ = fs::file_size(file_path, ec);
+      if (ec)
+        bytes_written_ = 0;
+      RefreshSymlink(directory_, app_name_, severity_, file_name_);
+    } catch (const std::exception& ex) {
+      std::fprintf(stderr, "Rime: failed to open log file %s: %s\n",
+                   ToUtf8(file_path).c_str(), ex.what());
+      inner_.reset();
+    }
+  }
+
+  static constexpr std::size_t kMaxLogBytes = 4u * 1024u * 1024u;
+  static constexpr std::size_t kLineOverhead = 64;
+
+  fs::path directory_;
+  std::string app_name_;
+  std::string date_;
+  std::string pid_;
+  std::string severity_;
+  std::shared_ptr<spdlog::sinks::basic_file_sink_mt> inner_;
+  std::string file_name_;
+  std::size_t bytes_written_ = 0;
+  int sequence_ = 0;
+};
 
 void RefreshSymlink(const fs::path& directory,
                     const std::string& app_name,
@@ -264,28 +363,16 @@ std::shared_ptr<spdlog::logger> BuildLogger(const char* app_name,
     for (const auto& directory : directories) {
       if (!EnsureLogDirectory(directory))
         continue;
+      PurgeExpiredLogs(directory, normalized_app_name);
 
-      std::vector<LogFileSink> log_files;
-      bool opened_all = true;
       for (const auto& spec : kSeverityFiles) {
-        auto log_file = CreateFileSink(directory, normalized_app_name, date,
-                                       pid, spec.name);
-        if (!log_file.sink) {
-          opened_all = false;
-          break;
-        }
-        log_files.push_back(std::move(log_file));
-      }
-      if (!opened_all)
-        continue;
-
-      for (std::size_t i = 0; i < log_files.size(); ++i) {
-        // A message is written to its own severity file and to every
-        // lower-severity file, just like glog's LogToAllLogfiles().
-        log_files[i].sink->set_level(kSeverityFiles[i].level);
-        sinks.push_back(log_files[i].sink);
-        RefreshSymlink(directory, normalized_app_name, kSeverityFiles[i].name,
-                       log_files[i].file_name);
+        auto lazy = std::make_shared<LazyFileSink>(directory,
+                                                   normalized_app_name, date,
+                                                   pid, spec.name);
+        // 同级别及以上写入自身文件（glog LogToAllLogfiles 语义）；
+        // 低于 min_log_level 的消息被 logger 整体丢弃，文件永不创建。
+        lazy->set_level(spec.level);
+        sinks.push_back(std::move(lazy));
       }
       file_logging = true;
       break;

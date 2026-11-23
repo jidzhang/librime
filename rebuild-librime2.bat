@@ -13,6 +13,6 @@ cmake . -B build -G "%CMAKE_GENERATOR%" -A %ARCH% -T %PLATFORM_TOOLSET%^
   -DBUILD_SHARED_LIBS=ON^
   -DBUILD_TEST=OFF^
   -DENABLE_LOGGING=ON^
-  -DCMAKE_PREFIX_PATH:PATH="%RIME_ROOT%\deps\usr" > %~dp0..\librime-reconfigure.log 2>&1
+  -DCMAKE_PREFIX_PATH:PATH="%RIME_ROOT%" > %~dp0..\librime-reconfigure.log 2>&1
 cmake --build build --config Release --target rime > %~dp0..\librime-build-full2.log 2>&1
 exit /b %ERRORLEVEL%

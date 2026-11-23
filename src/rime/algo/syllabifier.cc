@@ -439,6 +439,36 @@ int Syllabifier::BuildSyllableGraph(const string& input,
   // fuzzy spellings are immune to invalidation by normal spellings
   SpellingType last_type =
       (std::max)(graph->vertices[farthest], kFuzzySpelling);
+  // 混拼救边（2026-11-22）：整串能全拼读通时，上游会把所有缩写边剪掉。
+  // 但"W1 全拼 + W2 首字母"（xiexien=谢谢+n、youxier=有+些+r）是真实高频
+  // 输入形态，剪掉后谢谢你/有些人永远不进候选（d3 实测 34 条 0% 命中）。
+  // 收紧条件（第一版缺第二条，d1 全拼键 woxian/siba/dea 大面积回归）：
+  // ① 整串不是"单条全拼边"读通（保护 ken/dan/bin 单音节键）；
+  // ② 末字母本身不是合法全拼音节——a/e/i/o/u 这些韵母字母既是音节又是
+  //    声母缩写，救它们会让"si+b+a(缩写→死板)"类前缀扩展抢掉全拼 gold；
+  //    只救 n/r/g 这类"被 erase 的非音节字母"（xiexien 的 n、youxier 的 r）。
+  bool whole_input_single_normal = false;
+  if (graph->edges.find(0) != graph->edges.end()) {
+    auto whole = graph->edges[0].find(input.length());
+    if (whole != graph->edges[0].end()) {
+      for (const auto& s : whole->second) {
+        if (!s.second.is_correction && s.second.type == kNormalSpelling) {
+          whole_input_single_normal = true;
+          break;
+        }
+      }
+    }
+  }
+  bool tail_letter_is_normal_syllable = false;
+  if (input.length() >= 2) {
+    const string one(input.substr(input.length() - 1, 1));
+    int one_value = -1;
+    if (prism.GetValue(one, &one_value) && one_value >= 0) {
+      tail_letter_is_normal_syllable = SpellingIsNormal(prism, one_value);
+    }
+  }
+  const bool abbrev_rescue_enabled =
+      !whole_input_single_normal && !tail_letter_is_normal_syllable;
   for (int i = farthest - 1; i >= 0; --i) {
     if (graph->vertices.find(i) == graph->vertices.end())
       continue;
@@ -457,7 +487,13 @@ int Syllabifier::BuildSyllableGraph(const string& input,
           ++k;
           continue;  // Don't care correction edges
         }
-        if (k->second.type > last_type) {
+        // 混拼救边：末段缩写边在"整串不是单音节全拼"时幸存，
+        // 带 -0.693 credibility 惩罚，排序自然落在纯全拼候选之后。
+        bool tail_abbrev_rescue =
+            abbrev_rescue_enabled &&
+            k->second.type == kAbbreviation &&
+            j->first == static_cast<size_t>(input.length());
+        if (k->second.type > last_type && !tail_abbrev_rescue) {
           j->second.erase(k++);
         } else {
           if (k->second.type < edge_type)

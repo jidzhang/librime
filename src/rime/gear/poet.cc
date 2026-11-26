@@ -27,6 +27,7 @@ struct Line {
   size_t end_pos;
   double weight;
   size_t text_hash;  // for dedup
+  size_t agree = 0;  // 前缀惯性：已与上一帧显示对上的字数
 
   static const Line kEmpty;
 
@@ -69,7 +70,78 @@ struct Line {
   }
 };
 
-const Line Line::kEmpty{nullptr, nullptr, 0, 0.0, 0};
+const Line Line::kEmpty{nullptr, nullptr, 0, 0.0, 0, 0};
+
+inline static bool is_utf8_lead(char c) {
+  return (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+}
+
+inline static size_t rune_count(const string& text) {
+  return static_cast<size_t>(
+      std::count_if(text.begin(), text.end(), is_utf8_lead));
+}
+
+// word 的前 want 个字占多少字节；word 不足 want 个字返回 0。
+inline static size_t prefix_rune_bytes(const string& word, size_t want) {
+  size_t runes = 0;
+  for (size_t i = 0; i < word.size(); ++i) {
+    if (is_utf8_lead(word[i])) {
+      if (runes == want) return i;
+      ++runes;
+    }
+  }
+  return runes == want ? word.size() : 0;
+}
+
+void Poet::set_stable_prefix(const string& text,
+                             const vector<size_t>& ages,
+                             const vector<double>& bias_by_age) {
+  stable_.text = text;
+  stable_.offsets.clear();
+  for (size_t i = 0; i < stable_.text.size(); ++i) {
+    if (is_utf8_lead(stable_.text[i])) stable_.offsets.push_back(i);
+  }
+  stable_.offsets.push_back(stable_.text.size());
+  // 每个字的惯性分按它已连续显示的帧数取档；越老的档越靠后，超出取末档。
+  const size_t d = stable_.runes();
+  stable_.bias.assign(d, 0.);
+  for (size_t j = 0; j < d && !bias_by_age.empty(); ++j) {
+    const size_t age =
+        j < ages.size() && ages[j] > 0
+            ? (std::min)(ages[j], bias_by_age.size())
+            : 1;
+    stable_.bias[j] = bias_by_age[age - 1];
+  }
+  stable_.remain.assign(d + 1, 0.);
+  for (size_t j = d; j-- > 0;) {
+    stable_.remain[j] = stable_.remain[j + 1] + stable_.bias[j];
+  }
+}
+
+pair<double, size_t> Poet::ExtendStablePrefix(size_t agree,
+                                              const string& word) const {
+  if (!stable_.active() || agree == kStableDiverged) return {0., agree};
+  const size_t d = stable_.runes();
+  if (agree >= d) return {0., agree};  // 已越过显示范围，后面不再计分
+  const size_t head = prefix_rune_bytes(word, d - agree);
+  if (head != 0) {
+    // word 不短于剩余显示文字：对上剩余部分即走完显示范围。
+    if (stable_.text.compare(stable_.offsets[agree], head, word, 0, head) == 0)
+      return {stable_.remain[agree], d};
+    return {0., kStableDiverged};
+  }
+  // word 比剩余显示文字短：整词对上则继续，否则偏离。
+  if (stable_.text.compare(stable_.offsets[agree], word.size(), word) == 0) {
+    const size_t n = rune_count(word);
+    return {stable_.remain[agree] - stable_.remain[agree + n], agree + n};
+  }
+  return {0., kStableDiverged};
+}
+
+double Poet::StableKey(const Line& line) const {
+  if (!stable_.active() || line.agree == kStableDiverged) return line.weight;
+  return line.weight + stable_.remain[(std::min)(line.agree, stable_.runes())];
+}
 
 inline static Grammar* create_grammar(Config* config) {
   if (auto* grammar = Grammar::Require("grammar")) {
@@ -194,6 +266,12 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
                                             const string& preceding_text) {
   map<int, typename Strategy::State> states;
   Strategy::Initiate(states[0]);
+  Compare compare = compare_;
+  if (stable_.active()) {
+    compare = [this](const Line& one, const Line& other) {
+      return StableKey(one) < StableKey(other);
+    };
+  }
   for (const auto& sv : graph) {
     size_t start_pos = sv.first;
     if (states.find(start_pos) == states.end())
@@ -201,7 +279,7 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
     DLOG(INFO) << "start pos: " << start_pos;
     const auto& source_state = states[start_pos];
     const auto update = [this, &states, &sv, start_pos, total_length,
-                         &preceding_text](const Line& candidate) {
+                         &preceding_text, &compare](const Line& candidate) {
       for (const auto& ev : sv.second) {
         size_t end_pos = ev.first;
         if (start_pos == 0 && end_pos == total_length)
@@ -221,8 +299,13 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
                           Grammar::Evaluate(context, entry->text, entry->weight,
                                             is_rear, grammar_.get());
           Line new_line{&candidate, entry.get(), end_pos, weight};
+          if (stable_.active()) {
+            const auto extended = ExtendStablePrefix(candidate.agree, entry->text);
+            new_line.weight += extended.first;
+            new_line.agree = extended.second;
+          }
           Line& best = Strategy::BestLineToUpdate(target_state, new_line);
-          if (best.empty() || compare_(best, new_line)) {
+          if (best.empty() || compare(best, new_line)) {
             DLOG(INFO) << "updated line ending at " << end_pos
                        << " with text: ..." << new_line.last_word()
                        << " weight: " << new_line.weight;
@@ -231,12 +314,12 @@ an<Sentence> Poet::MakeSentenceWithStrategy(const WordGraph& graph,
         }
       }
     };
-    Strategy::ForEachCandidate(source_state, compare_, update);
+    Strategy::ForEachCandidate(source_state, compare, update);
   }
   auto found = states.find(total_length);
   if (found == states.end() || found->second.empty())
     return nullptr;
-  const Line& best = Strategy::BestLineInState(found->second, compare_);
+  const Line& best = Strategy::BestLineInState(found->second, compare);
   auto sentence = New<Sentence>(language_);
   for (const auto* c : best.components()) {
     if (!c->entry)
@@ -296,13 +379,20 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
             new_hash = new_hash * 31 + c;
           }
           Line new_line{&source_line, entry.get(), end_pos, weight, new_hash};
+          if (stable_.active()) {
+            const auto extended =
+                ExtendStablePrefix(source_line.agree, entry->text);
+            new_line.weight += extended.first;
+            new_line.agree = extended.second;
+          }
+          const double key = StableKey(new_line);
 
           // dedup by text hash
           auto dup = std::find_if(
               target_state.begin(), target_state.end(),
               [&](const Line& l) { return l.text_hash == new_line.text_hash; });
           if (dup != target_state.end()) {
-            if (new_line.weight > dup->weight) {
+            if (key > StableKey(*dup)) {
               target_state.erase(dup);
             } else {
               continue;
@@ -312,7 +402,7 @@ deque<an<Sentence>> Poet::MakeSentences(const WordGraph& graph,
           // insert in descending order of weight
           auto it = std::find_if(
               target_state.begin(), target_state.end(),
-              [&](const Line& l) { return l.weight < new_line.weight; });
+              [&](const Line& l) { return StableKey(l) < key; });
           target_state.insert(it, new_line);
           if (target_state.size() > beam_width)
             target_state.pop_back();

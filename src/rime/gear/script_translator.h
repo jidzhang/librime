@@ -21,6 +21,7 @@ class Corrector;
 struct DictEntry;
 class Dictionary;
 class Poet;
+class ScriptSyllabifier;
 class UserDictionary;
 struct SyllableGraph;
 
@@ -40,6 +41,10 @@ class ScriptTranslator : public Translator,
   string Spell(const Code& code);
   string GetPrecedingText(size_t start) const;
   bool UpdateElements(const CommitEntry& commit_entry);
+  // 前缀惯性：组句前按本帧输入定出"参照的显示文字"交给 Poet（见 poet.h）。
+  void ApplyStablePrefix(ScriptSyllabifier& syllabifier, size_t start);
+  // 组句后记下本帧首位候选及每个字已连续显示的帧数，供下一整音节帧参照。
+  void RememberStableFrame(const an<Candidate>& top);
 
   bool ConcatenatePhrases(CommitEntry& commit_entry,
                           const vector<an<Phrase>>& phrases);
@@ -151,6 +156,21 @@ class ScriptTranslator : public Translator,
   the<Corrector> corrector_;
   the<Poet> poet_;
   vector<an<Phrase>> queue_;
+  // 前缀惯性状态。只记整音节帧（音节没打完的帧不参照、不记账）：
+  //   stable_prefix_bias_  translator/stable_prefix_bias：第 n 项 = 已显示
+  //                        n 帧的字的惯性分（超出表尾取末项，空表 = 关）
+  //   stable_input_        最近一帧的段起点与输入
+  //   stable_display_      那一帧组句时参照的显示文字及其每字帧数
+  //   stable_top_          最近一个整音节帧算出的首位候选及其每字已显示帧数
+  //   stable_frame_        本帧是整音节帧，组句后要记入 stable_top_
+  vector<double> stable_prefix_bias_;
+  size_t stable_start_ = 0;
+  string stable_input_;
+  string stable_display_;
+  vector<size_t> stable_display_ages_;
+  string stable_top_;
+  vector<size_t> stable_ages_;
+  bool stable_frame_ = false;
 };
 
 }  // namespace rime

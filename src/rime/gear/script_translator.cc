@@ -73,6 +73,22 @@ static bool syllabify_dfs(SyllabifyTask* task,
   return false;
 }
 
+inline static size_t rune_len_at(const string& text, size_t pos) {
+  size_t len = 1;
+  while (pos + len < text.size() &&
+         (static_cast<unsigned char>(text[pos + len]) & 0xC0) == 0x80) {
+    ++len;
+  }
+  return len;
+}
+
+inline static size_t rune_count(const string& text) {
+  return static_cast<size_t>(std::count_if(
+      text.begin(), text.end(), [](char c) {
+        return (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+      }));
+}
+
 }  // anonymous namespace
 
 class ScriptSyllabifier : public PhraseSyllabifier {
@@ -135,6 +151,27 @@ class ScriptSyllabifier : public PhraseSyllabifier {
   bool HasNormalVertex() const { return syllabifier_.HasNormalVertex(); }
   bool IsNormalPinyinPrefix(Prism& prism) {
     return syllabifier_.IsNormalPinyinPrefix(input_, prism);
+  }
+  const string& input() const { return input_; }
+  // 整个输入能否只用普通全拼边读通（不含简拼、补全、纠错、模糊边）——
+  // "每个音节都打完了"。按引擎自己建的音节图判断，与实际组句同口径：
+  // 只看字符串会误判（jiaozuodo 的 do 在拼写表里读得通，组句却按补全猜）。
+  bool IsAllNormalSyllables() const {
+    set<size_t> reachable{0};
+    for (const auto& from : syllable_graph_.edges) {
+      if (reachable.find(from.first) == reachable.end()) continue;
+      for (const auto& to : from.second) {
+        if (to.first > syllable_graph_.input_length) break;
+        for (const auto& spelling : to.second) {
+          if (spelling.second.type == kNormalSpelling &&
+              !spelling.second.is_correction) {
+            reachable.insert(to.first);
+            break;
+          }
+        }
+      }
+    }
+    return reachable.find(syllable_graph_.input_length) != reachable.end();
   }
 
   virtual Spans Syllabify(const Phrase* phrase);
@@ -361,6 +398,20 @@ ScriptTranslator::ScriptTranslator(const Ticket& ticket)
     config->GetBool(name_space_ + "/abbrev_sentences", &abbrev_sentences_);
     config->GetDouble(name_space_ + "/sentence_quality_boost",
                       &sentence_quality_boost_);
+    if (an<ConfigList> table =
+            config->GetList(name_space_ + "/stable_prefix_bias")) {
+      // 位置即档位：第 n 项 = 已显示 n 帧的档，超出表尾取末项；0 = 该档不设防。
+      for (size_t i = 0; i < table->size() && i < 8; ++i) {
+        const an<ConfigValue> item = table->GetValueAt(i);
+        double value = 0.;
+        if (item && item->GetDouble(&value) && value >= 0.) {
+          stable_prefix_bias_.push_back(value);
+        }
+      }
+      while (!stable_prefix_bias_.empty() && stable_prefix_bias_.back() == 0.) {
+        stable_prefix_bias_.pop_back();
+      }
+    }
     poet_.reset(new Poet(language(), config));
     if (an<ConfigList> rules = config->GetList(name_space_ + "/canonicalize")) {
       the<Projection> canonicalizer(new Projection());
@@ -398,6 +449,7 @@ an<Translation> ScriptTranslator::Query(const string& input,
   if (!primary ||
       !primary->Evaluate(dict_.get(),
                          enable_user_dict ? user_dict_.get() : NULL)) {
+    poet_->clear_stable_prefix();
     return nullptr;
   }
   an<Translation> result = primary;
@@ -446,11 +498,71 @@ an<Translation> ScriptTranslator::Query(const string& input,
       }
     }
   }
+  // 惯性只在本次组句时生效；整音节帧的首位候选记为下一帧的显示文字。
+  poet_->clear_stable_prefix();
+  RememberStableFrame(result->Peek());
   auto deduped = New<DistinctTranslation>(result);
   if (contextual_suggestions_) {
     return poet_->ContextualWeighted(deduped, input, segment.start, this);
   }
   return deduped;
+}
+
+// 前缀惯性（2026-11-25）：续打是用户对已显示文字的隐式确认。新输入以同段
+// 最近一帧的输入为前缀、且整个输入由完整全拼音节组成（每个音节都打完了）
+// 时，上一个整音节帧的首位候选就是用户看到的前缀，交给 Poet 给与之一致
+// 的路径按字加分。只认整音节帧：音节打了一半的帧显示的多是补全或纠错边
+// 的猜测（jiaozuod→焦作东），拿它当"已确认"会让惯性去保猜测。简拼、混拼、
+// 带错字的输入因此不参与；退格、改段、重新组字也都不是续打。
+// 同一输入被重译（选项变更等）沿用这一帧自己的显示文字，结果不因重译而变。
+void ScriptTranslator::ApplyStablePrefix(ScriptSyllabifier& syllabifier,
+                                         size_t start) {
+  const string& input = syllabifier.input();
+  if (start == stable_start_ && input == stable_input_) {
+    poet_->set_stable_prefix(stable_display_, stable_display_ages_,
+                             stable_prefix_bias_);
+    return;
+  }
+  stable_frame_ = false;
+  stable_display_.clear();
+  stable_display_ages_.clear();
+  // 整音节帧：组句后把首位候选记为"用户看到的显示"，无论这一帧是否续打。
+  if (!stable_prefix_bias_.empty() && syllabifier.IsAllNormalSyllables()) {
+    stable_frame_ = true;
+    // 续打：同段、新输入以最近一帧的输入为前缀。
+    if (start == stable_start_ && !stable_input_.empty() &&
+        !stable_top_.empty() && input.length() > stable_input_.length() &&
+        input.compare(0, stable_input_.length(), stable_input_) == 0) {
+      stable_display_ = stable_top_;
+      stable_display_ages_ = stable_ages_;
+    }
+  }
+  stable_input_ = input;
+  stable_start_ = start;
+  poet_->set_stable_prefix(stable_display_, stable_display_ages_,
+                           stable_prefix_bias_);
+}
+
+void ScriptTranslator::RememberStableFrame(const an<Candidate>& top) {
+  if (!stable_frame_) return;
+  stable_frame_ = false;
+  const string text = top ? top->text() : string();
+  vector<size_t> ages;
+  // 与上一帧首位候选逐字比对：没变的字已显示帧数 +1，其余是新字。
+  size_t a = 0, b = 0;
+  while (a < text.size() && b < stable_top_.size()) {
+    const size_t la = rune_len_at(text, a);
+    const size_t lb = rune_len_at(stable_top_, b);
+    if (la != lb || stable_top_.compare(b, lb, text, a, la) != 0) break;
+    ages.push_back(ages.size() < stable_ages_.size()
+                       ? stable_ages_[ages.size()] + 1
+                       : 1);
+    a += la;
+    b += lb;
+  }
+  ages.resize(rune_count(text), 1);
+  stable_top_ = text;
+  stable_ages_ = ages;
 }
 
 int ScriptTranslator::core_word_length() const {
@@ -676,6 +788,8 @@ bool ScriptTranslation::Evaluate(Dictionary* dict, UserDictionary* user_dict) {
 bool ScriptTranslation::EvaluateWithGraph(Dictionary* dict,
                                           UserDictionary* user_dict) {
   size_t consumed = syllabifier_->BuildSyllableGraph(*dict->prism());
+  // 音节图建好才知道这一帧是否由完整音节组成，所以惯性在这里才定。
+  translator_->ApplyStablePrefix(*syllabifier_, start_);
   const auto& syllable_graph = syllabifier_->syllable_graph();
   bool predict_word = translator_->enable_word_completion() &&
                       start_ + consumed == end_of_input_;
